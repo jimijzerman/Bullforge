@@ -10,33 +10,16 @@ from pathlib import Path
 st.set_page_config(page_title="BullForge", layout="wide")
 
 # =========================================================
-# Fase 1 cleanup note
-# =========================================================
-# Deze versie is opgeschoond zonder strategie-logica te wijzigen.
-# Verwijderd: oude overschreven duplicate top-level functies.
-# Bewust niet gedaan in Fase 1: magic numbers veranderen, trade-regels aanpassen,
-# UI-flow wijzigen of nieuwe features toevoegen.
-
-
-# =========================================================
-# Fase 2 cleanup note
-# =========================================================
-# Deze versie centraliseert belangrijke magic numbers in configs.
-# Doel: beter leesbaar en makkelijker tunen, zonder strategie-logica te wijzigen.
-
-
-# =========================================================
 # Config
 # =========================================================
-REFRESH_CONFIG = {
-    # Hoe vaak analyse/candles/scanner/live-prijs mogen verversen.
-    "analysis_sec": 20,
-    "scanner_cache_sec": 60,
-    "ui_sec": 2,
-    "live_price_cache_sec": 2,
-    "auto_scan_tick_sec": 3,
-    # Auto scan interval per gekozen timeframe.
-    "auto_scan_interval_sec_by_tf": {
+REFRESH_ANALYSIS_SEC = 20
+SCANNER_CACHE_SEC = 60
+REFRESH_UI_SEC = 2
+LIVE_PRICE_CACHE_SEC = 2
+AUTO_SCAN_TICK_SEC = 3
+
+def get_auto_scan_interval_sec(timeframe_label: str) -> int:
+    return {
         "1m": 5,
         "5m": 8,
         "15m": 12,
@@ -44,17 +27,7 @@ REFRESH_CONFIG = {
         "1h": 30,
         "4h": 45,
         "1d": 60,
-    },
-    "default_auto_scan_interval_sec": 12,
-}
-
-
-def get_auto_scan_interval_sec(timeframe_label: str) -> int:
-    return REFRESH_CONFIG["auto_scan_interval_sec_by_tf"].get(
-        timeframe_label,
-        REFRESH_CONFIG["default_auto_scan_interval_sec"],
-    )
-
+    }.get(timeframe_label, 12)
 
 if hasattr(st, "fragment"):
     bf_fragment = st.fragment
@@ -77,384 +50,53 @@ COINS = {
     "XLM": {"bitvavo_market": "XLM-EUR"},
 }
 
-TIMEFRAME_CONFIG = {
-    "timeframes": {
-        "1m": "1m",
-        "5m": "5m",
-        "15m": "15m",
-        "30m": "30m",
-        "1h": "1h",
-        "4h": "4h",
-        "1d": "1d",
-    },
-    # trigger = exacte instap timeframe
-    # setup   = timeframe voor de trade-opzet
-    # trend   = timeframe voor de hoofdrichting
-    "hierarchy": {
-        "1m":  {"trigger": "1m",  "setup": "5m",  "trend": "15m"},
-        "5m":  {"trigger": "5m",  "setup": "15m", "trend": "1h"},
-        "15m": {"trigger": "15m", "setup": "15m", "trend": "1h"},
-        "30m": {"trigger": "30m", "setup": "1h",  "trend": "4h"},
-        "1h":  {"trigger": "1h",  "setup": "4h",  "trend": "1d"},
-        "4h":  {"trigger": "4h",  "setup": "1d",  "trend": "1d"},
-        "1d":  {"trigger": "1d",  "setup": "1d",  "trend": "1d"},
-    },
-    "higher_timeframe_map": {
-        "1m": "15m",
-        "5m": "1h",
-        "15m": "4h",
-        "30m": "4h",
-        "1h": "1d",
-        "4h": "1d",
-        "1d": "1d",
-    },
-    "level_refinement_map": {
-        "1m": ["15m"],
-        "5m": ["15m", "1h"],
-        "15m": ["15m", "1h"],
-        "30m": ["15m", "1h"],
-        "1h": ["1h", "4h"],
-        "4h": ["4h"],
-        "1d": ["1d"],
-    },
-    "level_authority_map": {
-        "1m": ["15m", "1h", "4h"],
-        "5m": ["15m", "1h", "4h"],
-        "15m": ["15m", "1h", "4h"],
-        "30m": ["15m", "1h", "4h"],
-        "1h": ["1h", "4h"],
-        "default": ["4h", "1d"],
-    },
-    "daytrade_timeframes": {"1m", "5m", "15m", "30m"},
-    "chart_focus_lookback": {"1m": 160, "5m": 140, "15m": 110, "30m": 100},
-    "expected_hold_hours": {
-        "1m": 2.0,
-        "5m": 4.0,
-        "15m": 8.0,
-        "30m": 12.0,
-        "1h": 24.0,
-        "4h": 36.0,
-        "1d": 72.0,
-    },
+TIMEFRAMES = {
+    "1m": "1m",
+    "5m": "5m",
+    "15m": "15m",
+    "30m": "30m",
+    "1h": "1h",
+    "4h": "4h",
+    "1d": "1d",
 }
 
-RISK_CONFIG = {
-    "fees_pct": {
-        "maker": 0.09,
-        "taker": 0.18,
-        "short_liquidation": 2.0,
-    },
-    "short_borrow_hourly_pct": {
-        "BTC": 0.01,
-        "ETH": 0.01,
-        "SOL": 0.012,
-        "TAO": 0.02,
-        "XRP": 0.012,
-        "XLM": 0.012,
-    },
-    "min_risk_pct_by_timeframe": {
-        "1m": 0.05,
-        "5m": 0.09,
-        "15m": 0.14,
-        "30m": 0.20,
-        "1h": 0.30,
-        "4h": 0.50,
-        "1d": 0.80,
-    },
-    "max_risk_pct_by_timeframe": {
-        "1m": 0.55,
-        "5m": 0.85,
-        "15m": 1.35,
-        "30m": 1.90,
-        "1h": 2.80,
-        "4h": 5.50,
-        "1d": 9.0,
-    },
-    "default_min_risk_pct": 0.20,
-    "default_max_risk_pct": 2.0,
-    "sl_too_tight_rr_threshold": 4.0,
-    "sl_too_tight_rr_risk_multiplier": 1.35,
-    "min_risk_volatility_factor": 0.18,
-    "max_risk_volatility_factor": 1.20,
+
+# Multi-timeframe hierarchy (stap 1)
+# trigger = exacte instap timeframe
+# setup   = timeframe voor de trade-opzet
+# trend   = timeframe voor de hoofdrichting
+TIMEFRAME_HIERARCHY = {
+    "1m":  {"trigger": "1m",  "setup": "5m",  "trend": "15m"},
+    "5m":  {"trigger": "5m",  "setup": "15m", "trend": "1h"},
+    # 15m is daytrading: 15m/1h bepalen trade-zones; 4h is alleen macro-context.
+    "15m": {"trigger": "15m", "setup": "15m", "trend": "1h"},
+    "30m": {"trigger": "30m", "setup": "1h",  "trend": "4h"},
+    "1h":  {"trigger": "1h",  "setup": "4h",  "trend": "1d"},
+    "4h":  {"trigger": "4h",  "setup": "1d",  "trend": "1d"},
+    "1d":  {"trigger": "1d",  "setup": "1d",  "trend": "1d"},
 }
 
-ZONE_CONFIG = {
-    # Basis-zonebreedtes per coin in procenten.
-    "base_width_pct": {
-        "BTC": 0.12,
-        "ETH": 0.15,
-        "SOL": 0.22,
-        "TAO": 0.34,
-        "XRP": 0.16,
-        "XLM": 0.14,
-    },
-    "default_base_width_pct": 0.18,
-    "default_avg_range_pct": 0.8,
-    "vol_factor_min": 0.45,
-    "vol_factor_max": 1.35,
-    "vol_factor_normalizer": 1.15,
-    "kind_factor": {
-        "entry": 1.00,
-        "target": 0.45,
-        "invalidation": 0.55,
-    },
-    "min_width_pct_by_kind": {
-        "entry": 0.035,
-        "target": 0.025,
-        "invalidation": 0.030,
-    },
-    "max_width_pct_by_kind": {
-        "entry": 0.55,
-        "target": 0.30,
-        "invalidation": 0.38,
-    },
-    "daytrade_width_multiplier": 0.65,
-    "daytrade_min_width_pct": 0.025,
-    "ladder_default_steps": 3,
-    "ladder_default_weights_pct": [40.0, 35.0, 25.0],
+HIGHER_TIMEFRAME_MAP = {
+    "1m": "15m",
+    "5m": "1h",
+    "15m": "4h",
+    "30m": "4h",
+    "1h": "1d",
+    "4h": "1d",
+    "1d": "1d",
 }
 
-PLAN_CONFIG = {
-    "midrange_low_pct": 40.0,
-    "midrange_high_pct": 60.0,
-    "range_extreme_low_pct": 25.0,
-    "range_extreme_high_pct": 75.0,
-    "range_title_green_long_pct": 65.0,
-    "range_title_green_short_pct": 35.0,
-    "near_target_missed_pct": 0.18,
-    "near_entry_zone_multiplier": 1.50,
-    "near_entry_min_pct": 0.05,
-    "countertrend_block_penalty": -250.0,
-    # Fase 3: Plan-first statussen. Entry-confirmation is bonus, geen poortwachter.
-    "plan_status_rank": {
-        "READY": 50,
-        "NEAR": 40,
-        "UPCOMING": 30,
-        "PLAN": 25,
-        "WAIT": 10,
-        "MISSED": 0,
-        "INVALID": -10,
-        "NO_PLAN": -20,
-        "HANDS_OFF": -30,
-        "BLOCKED": -40,
-    },
+
+LEVEL_REFINEMENT_MAP = {
+    "1m": ["15m"],
+    "5m": ["15m", "1h"],
+    "15m": ["15m", "1h"],
+    "30m": ["15m", "1h"],
+    # 1h gebruikt eigen recente swing-levels + 4h context, niet 1d als actieve entry.
+    "1h": ["1h", "4h"],
+    "4h": ["4h"],
+    "1d": ["1d"],
 }
-
-ANTI_CHASE_CONFIG = {
-    "max_extension_pct_by_timeframe": {
-        "1m": 0.22,
-        "5m": 0.35,
-        "15m": 0.55,
-        "30m": 0.75,
-        "1h": 1.10,
-        "4h": 1.80,
-        "1d": 2.80,
-    },
-    "default_max_extension_pct": 0.75,
-    "extension_volatility_factor": 0.45,
-    "impulse_body_ratio_by_timeframe": {
-        "1m": 1.75,
-        "5m": 1.85,
-        "15m": 2.00,
-        "30m": 2.10,
-        "1h": 2.20,
-        "4h": 2.35,
-        "1d": 2.50,
-    },
-    "default_impulse_body_ratio": 2.0,
-    "target_almost_hit_move_fraction": 0.75,
-    "recent_target_hit_window_by_tf": {"1m": 12, "5m": 10, "15m": 8, "30m": 6, "1h": 5},
-    "default_recent_target_hit_window": 8,
-    "missed_progress_pct": 70.0,
-    "freshness_recent_window_by_tf": {"1m": 12, "5m": 8, "15m": 6, "30m": 5, "1h": 4, "4h": 3, "1d": 2},
-    "freshness_penalty": {
-        "target_recently_hit": 120.0,
-        "hard_stale_progress_pct": 75.0,
-        "hard_stale_penalty": 90.0,
-        "stale_progress_pct": 60.0,
-        "stale_penalty": 55.0,
-        "aging_progress_pct": 40.0,
-        "aging_penalty": 20.0,
-    },
-}
-
-VOLUME_CONFIG = {
-    "lookback_recent_candles": 30,
-    "baseline_candles": 20,
-    "last_n_candles": 3,
-    "prior_avg_candles": 12,
-    "spike_ratio": 1.80,
-    "high_ratio": 1.20,
-    "low_ratio": 0.70,
-    "drying_up_last_n_ratio": 0.75,
-    "weak_breakout_ratio": 0.85,
-    "near_target_pct": 0.20,
-    "support_rejection_bonus": 28.0,
-    "support_touch_bonus": 8.0,
-    "support_touch_low_volume_penalty": -8.0,
-    "breakout_volume_bonus": 18.0,
-    "breakout_against_penalty": -8.0,
-    "weak_breakout_penalty": -10.0,
-    "spike_body_bonus": 8.0,
-    "drying_up_penalty": -4.0,
-    "direction_score_margin": 8.0,
-}
-
-SCORING_CONFIG = {
-    "bad_metrics_score": -10_000.0,
-    "candidate": {
-        "conservative_net_min": -15.0,
-        "conservative_net_max": 35.0,
-        "conservative_net_multiplier": 2.0,
-        "rr_min": -10.0,
-        "rr_max": 22.0,
-        "rr_multiplier": 8.0,
-        "bias_aligned_bonus": 16.0,
-        "bias_opposite_penalty": -18.0,
-        "bias_cautious_penalty": -2.0,
-        "context_pullback_bonus": 16.0,
-        "context_aligned_bonus": 12.0,
-        "context_pullback_against_penalty": -22.0,
-        "context_aligned_against_penalty": -28.0,
-        "blocked_penalty": -200.0,
-    },
-    "setup_grade": {
-        "good_score": 55.0,
-        "ok_score": 30.0,
-    },
-    "confirmation": {
-        "touched_zone_bonus": 18.0,
-        "rejection_bonus": 26.0,
-        "close_back_in_favor_bonus": 22.0,
-        "reclaim_trigger_bonus": 24.0,
-        "volume_support_bonus": 10.0,
-        "confirmed_min_score": 70.0,
-        "max_score": 100.0,
-        "strong_label_score": 70.0,
-        "ok_label_score": 40.0,
-    },
-    "ranking": {
-        "plan_mode_bonus": 4.0,
-        "plan_ready_bonus": 4.0,
-        "plan_near_bonus": 2.0,
-        "early_entry_bonus": 8.0,
-        "retest_entry_bonus": 6.0,
-        "location_b_entry_penalty": -3.0,
-        "location_late_penalty": -8.0,
-        "location_skip_penalty": -100.0,
-        "blocked_penalty": -200.0,
-        "missed_penalty": -120.0,
-        "ready_bonus": 10.0,
-        "plan_bonus": 4.0,
-        "retest_confirmation_multiplier": 0.22,
-        "retest_confirmation_cap": 22.0,
-        "confirmation_multiplier": 0.10,
-        "confirmation_cap": 10.0,
-        "sort_missing_score": -9999.0,
-    },
-    "target_realism": {
-        "base_score": 70.0,
-        "too_close_penalty": -35.0,
-        "too_far_penalty": -40.0,
-        "micro_bonus": 12.0,
-        "primary_bonus": 8.0,
-        "good_score": 70.0,
-        "ok_score": 45.0,
-        "min_dist_pct_by_tf": {"1m": 0.025, "5m": 0.045, "15m": 0.070, "30m": 0.16, "1h": 0.25, "4h": 0.55, "1d": 0.90},
-        "max_dist_pct_by_tf": {"1m": 0.45, "5m": 0.75, "15m": 1.15, "30m": 2.20, "1h": 3.50, "4h": 7.00, "1d": 13.0},
-        "default_min_dist_pct": 0.20,
-        "default_max_dist_pct": 2.5,
-        "realism_max_dist_pct_by_tf": {"1m": 0.42, "5m": 0.70, "15m": 1.10, "30m": 2.10, "1h": 3.20, "4h": 6.50, "1d": 12.0},
-        "realism_default_max_dist_pct": 2.0,
-        "realism_max_dist_volatility_factor": 1.35,
-        "rank_base": 100.0,
-        "rank_distance_multiplier": 12.0,
-        "rank_weight_multiplier": 3.0,
-    },
-    "sl_breathing": {
-        "base_score": 72.0,
-        "too_tight_penalty": -35.0,
-        "too_wide_penalty": -28.0,
-        "wrong_side_penalty": -25.0,
-        "good_score": 70.0,
-        "ok_score": 45.0,
-    },
-}
-
-LOWER_TF_CONFIG = {
-    "active_timeframes": {"1m", "5m", "15m"},
-    "micro_lookback": {"1m": 100, "5m": 90, "15m": 70},
-    "default_micro_lookback": 60,
-    "micro_swing_window": 2,
-    "micro_merge_threshold_default_pct": 0.10,
-    "micro_merge_factor": 0.45,
-    "micro_merge_min_pct": 0.025,
-    "micro_merge_max_pct": 0.11,
-    "max_entry_distance_pct": {"1m": 0.38, "5m": 0.62, "15m": 0.95},
-    "default_max_entry_distance_pct": 0.70,
-    "min_entry_distance_major_pct": 0.006,
-    "min_entry_distance_alt_pct": 0.010,
-    "hard_level_distance_multiplier": 1.35,
-    "recent_extreme_fallback_multiplier": 1.25,
-    "target_min_distance_pct": {"1m": 0.025, "5m": 0.045, "15m": 0.070},
-    "target_max_distance_pct": {"1m": 0.42, "5m": 0.70, "15m": 1.05},
-    "target_default_min_distance_pct": 0.06,
-    "target_default_max_distance_pct": 0.80,
-    "target_fallback_multiplier": 1.75,
-    "atr_buffer_multiplier": {"1m": 0.80, "5m": 0.95, "15m": 1.15},
-    "default_atr_buffer_multiplier": 1.0,
-    "fallback_atr_buffer_pct": 0.0012,
-    "min_stop_buffer_pct": {"1m": 0.06, "5m": 0.10, "15m": 0.16},
-    "default_min_stop_buffer_pct": 0.10,
-    "base_buffer_fraction": 0.25,
-    "atr_lookback": 20,
-}
-
-JOURNAL_CONFIG = {
-    "trade_journal_file": Path("bullforge_trade_journal.csv"),
-    "trade_outcomes": ["OPEN", "TP", "SL", "BE", "MANUAL_EXIT", "NO_FILL"],
-    "daily_results_file": Path("bullforge_daily_results.csv"),
-    "daily_result_types": ["WIN", "LOSS", "NO_TRADE"],
-    "fill_status_options": ["UNKNOWN", "NOT_PLACED", "PENDING", "FILLED", "PARTIAL", "MISSED", "CANCELLED"],
-    "learning": {
-        "min_tp_or_sl_count": 3,
-        "be_manual_warning_ratio": 0.35,
-        "a_entry_good_winrate_pct": 50.0,
-        "late_bad_lossrate_pct": 45.0,
-        "setup_comparison_delta_pct": 10.0,
-        "no_trade_day_warning_ratio": 0.40,
-    },
-}
-
-TIMEFRAMES = TIMEFRAME_CONFIG["timeframes"]
-TIMEFRAME_HIERARCHY = TIMEFRAME_CONFIG["hierarchy"]
-HIGHER_TIMEFRAME_MAP = TIMEFRAME_CONFIG["higher_timeframe_map"]
-LEVEL_REFINEMENT_MAP = TIMEFRAME_CONFIG["level_refinement_map"]
-
-REFRESH_ANALYSIS_SEC = REFRESH_CONFIG["analysis_sec"]
-SCANNER_CACHE_SEC = REFRESH_CONFIG["scanner_cache_sec"]
-REFRESH_UI_SEC = REFRESH_CONFIG["ui_sec"]
-LIVE_PRICE_CACHE_SEC = REFRESH_CONFIG["live_price_cache_sec"]
-AUTO_SCAN_TICK_SEC = REFRESH_CONFIG["auto_scan_tick_sec"]
-
-DEFAULT_MAKER_FEE_PCT = RISK_CONFIG["fees_pct"]["maker"]
-DEFAULT_TAKER_FEE_PCT = RISK_CONFIG["fees_pct"]["taker"]
-DEFAULT_SHORT_LIQUIDATION_FEE_PCT = RISK_CONFIG["fees_pct"]["short_liquidation"]
-DEFAULT_SHORT_BORROW_HOURLY_PCT = RISK_CONFIG["short_borrow_hourly_pct"]
-DEFAULT_EXPECTED_HOLD_HOURS = TIMEFRAME_CONFIG["expected_hold_hours"]
-
-ENTRY_MODES = {
-    "Early price-action": "doopiecash",
-    "Retest-breakout": "confirmation",
-}
-
-JOURNAL_FILE = JOURNAL_CONFIG["trade_journal_file"]
-JOURNAL_OUTCOMES = JOURNAL_CONFIG["trade_outcomes"]
-DAILY_RESULTS_FILE = JOURNAL_CONFIG["daily_results_file"]
-DAILY_RESULT_TYPES = JOURNAL_CONFIG["daily_result_types"]
-FILL_STATUS_OPTIONS = JOURNAL_CONFIG["fill_status_options"]
-ZONE_BASE_WIDTH_PCT = ZONE_CONFIG["base_width_pct"]
-
 
 def get_refinement_timeframes(base_timeframe_label: str) -> List[str]:
     """
@@ -474,7 +116,7 @@ def get_refinement_timeframes(base_timeframe_label: str) -> List[str]:
 
 
 def is_daytrade_timeframe(timeframe_label: str) -> bool:
-    return str(timeframe_label) in TIMEFRAME_CONFIG["daytrade_timeframes"]
+    return str(timeframe_label) in {"1m", "5m", "15m", "30m"}
 
 
 def get_level_authority_timeframes(base_timeframe_label: str) -> List[str]:
@@ -483,20 +125,204 @@ def get_level_authority_timeframes(base_timeframe_label: str) -> List[str]:
     15m/1h leveren intraday-zones; 4h is macro-context.
     """
     tf = str(base_timeframe_label)
-    return TIMEFRAME_CONFIG["level_authority_map"].get(
-        tf,
-        TIMEFRAME_CONFIG["level_authority_map"]["default"],
-    )
+    if tf in {"1m", "5m", "15m"}:
+        return ["15m", "1h", "4h"]
+    if tf == "30m":
+        return ["15m", "1h", "4h"]
+    if tf == "1h":
+        # 1d blijft macro-context; actieve 1h entry/target zones komen uit 1h/4h.
+        return ["1h", "4h"]
+    return ["4h", "1d"]
 
 
 def prepare_chart_focus_df(df: Optional[pd.DataFrame], timeframe_label: str) -> Optional[pd.DataFrame]:
     """Toon op lage TF een rustige intraday-chart in plaats van alle oude macro candles."""
     if df is None or df.empty:
         return df
-    lookback = TIMEFRAME_CONFIG["chart_focus_lookback"].get(str(timeframe_label))
+    lookback = {"1m": 160, "5m": 140, "15m": 110, "30m": 100}.get(str(timeframe_label))
     if lookback is None:
         return df
     return df.tail(min(len(df), lookback)).copy()
+
+DEFAULT_MAKER_FEE_PCT = 0.09
+DEFAULT_TAKER_FEE_PCT = 0.18
+
+DEFAULT_SHORT_LIQUIDATION_FEE_PCT = 2.0
+
+DEFAULT_SHORT_BORROW_HOURLY_PCT = {
+    "BTC": 0.01,
+    "ETH": 0.01,
+    "SOL": 0.012,
+    "TAO": 0.02,
+    "XRP": 0.012,
+    "XLM": 0.012,
+}
+
+DEFAULT_EXPECTED_HOLD_HOURS = {
+    "1m": 2.0,
+    "5m": 4.0,
+    "15m": 8.0,
+    "30m": 12.0,
+    "1h": 24.0,
+    "4h": 36.0,
+    "1d": 72.0,
+}
+
+# Clean active entry architecture:
+# - Early price-action
+# - Retest-breakout
+# Old limit/balanced routing is no longer used in active decisioning.
+ENTRY_MODES = {
+    "Early price-action": "doopiecash",
+    "Retest-breakout": "confirmation",
+}
+
+JOURNAL_FILE = Path("bullforge_trade_journal.csv")
+JOURNAL_OUTCOMES = ["OPEN", "TP", "SL", "BE", "MANUAL_EXIT", "NO_FILL"]
+
+DAILY_RESULTS_FILE = Path("bullforge_daily_results.csv")
+DAILY_RESULT_TYPES = ["WIN", "LOSS", "NO_TRADE"]
+
+
+
+def load_trade_journal() -> pd.DataFrame:
+    columns = [
+        "journal_id", "logged_at", "coin", "scanner_tf", "trigger_tf", "setup_tf", "trend_tf",
+        "context", "trend_label", "side", "plan_type", "entry_variant", "location_quality",
+        "entry", "stop", "target", "rr", "net_profit_eur", "conservative_net", "score",
+        "current_price", "outcome", "resolved_at", "notes"
+    ]
+    text_columns = [
+        "journal_id", "logged_at", "coin", "scanner_tf", "trigger_tf", "setup_tf", "trend_tf",
+        "context", "trend_label", "side", "plan_type", "entry_variant", "location_quality",
+        "outcome", "resolved_at", "notes"
+    ]
+
+    if JOURNAL_FILE.exists():
+        try:
+            df = pd.read_csv(JOURNAL_FILE)
+            for col in columns:
+                if col not in df.columns:
+                    df[col] = None
+            df = df[columns].copy()
+            for col in text_columns:
+                df[col] = df[col].astype("object")
+            return df
+        except Exception:
+            return pd.DataFrame(columns=columns)
+
+    df = pd.DataFrame(columns=columns)
+    for col in text_columns:
+        df[col] = df[col].astype("object")
+    return df
+
+
+def save_trade_journal(df: pd.DataFrame) -> None:
+    df_to_save = df.copy()
+    text_columns = [
+        "journal_id", "logged_at", "coin", "scanner_tf", "trigger_tf", "setup_tf", "trend_tf",
+        "context", "trend_label", "side", "plan_type", "entry_variant", "location_quality",
+        "outcome", "resolved_at", "notes"
+    ]
+    for col in text_columns:
+        if col in df_to_save.columns:
+            df_to_save[col] = df_to_save[col].astype("object")
+    df_to_save.to_csv(JOURNAL_FILE, index=False)
+
+
+def build_journal_entry(
+    selected_result: Dict[str, object],
+    side: str,
+    plan_type: str,
+    metrics: Optional[Dict[str, object]],
+) -> Dict[str, object]:
+    location_info = selected_result.get("long_location", {}) if side == "LONG" else selected_result.get("short_location", {})
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    journal_id = f"{selected_result.get('coin','UNK')}-{side}-{plan_type}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+    return {
+        "journal_id": journal_id,
+        "logged_at": now,
+        "coin": selected_result.get("coin"),
+        "scanner_tf": selected_result.get("timeframe_label"),
+        "trigger_tf": selected_result.get("trigger_timeframe_label"),
+        "setup_tf": selected_result.get("setup_timeframe_label"),
+        "trend_tf": selected_result.get("trend_timeframe_label"),
+        "context": selected_result.get("market_context"),
+        "trend_label": selected_result.get("trend_label"),
+        "side": side,
+        "plan_type": plan_type,
+        "entry_variant": selected_result.get("chosen_entry_variant"),
+        "location_quality": location_info.get("quality"),
+        "entry": float(metrics["entry"]) if metrics else None,
+        "stop": float(metrics["stop"]) if metrics else None,
+        "target": float(metrics["target"]) if metrics else None,
+        "rr": float(metrics["rr"]) if metrics else None,
+        "net_profit_eur": float(metrics["net_profit_eur"]) if metrics else None,
+        "conservative_net": float(selected_result.get("conservative_best_net") or 0.0) if plan_type == "best" else None,
+        "score": float(selected_result.get("score") or 0.0),
+        "current_price": float(selected_result.get("current_price") or 0.0) if selected_result.get("current_price") is not None else None,
+        "outcome": "OPEN",
+        "resolved_at": None,
+        "notes": "",
+    }
+
+
+
+def build_manual_journal_entry(
+    coin: str,
+    scanner_tf: str,
+    trigger_tf: str,
+    setup_tf: str,
+    trend_tf: str,
+    context: str,
+    trend_label: str,
+    side: str,
+    plan_type: str,
+    location_quality: str,
+    entry: float,
+    stop: float,
+    target: float,
+    notes: str = "",
+) -> Dict[str, object]:
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    journal_id = f"{coin}-{side}-{plan_type}-MAN-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+    rr = None
+    if side == "LONG" and entry > stop:
+        rr = max((target - entry) / (entry - stop), 0.0)
+    elif side == "SHORT" and stop > entry:
+        rr = max((entry - target) / (stop - entry), 0.0)
+
+    return {
+        "journal_id": journal_id,
+        "logged_at": now,
+        "coin": coin,
+        "scanner_tf": scanner_tf,
+        "trigger_tf": trigger_tf,
+        "setup_tf": setup_tf,
+        "trend_tf": trend_tf,
+        "context": context,
+        "trend_label": trend_label,
+        "side": side,
+        "plan_type": plan_type,
+        "entry_variant": "manual",
+        "location_quality": location_quality,
+        "entry": float(entry),
+        "stop": float(stop),
+        "target": float(target),
+        "rr": round(float(rr), 2) if rr is not None else None,
+        "net_profit_eur": None,
+        "conservative_net": None,
+        "score": None,
+        "current_price": None,
+        "outcome": "OPEN",
+        "resolved_at": None,
+        "notes": notes,
+    }
+
+def append_trade_journal(entry: Dict[str, object]) -> None:
+    df = load_trade_journal()
+    df = pd.concat([df, pd.DataFrame([entry])], ignore_index=True)
+    save_trade_journal(df)
 
 
 def load_daily_results() -> pd.DataFrame:
@@ -570,6 +396,28 @@ def _safe_pct(win_count: float, total_count: float) -> float:
     return round((float(win_count) / float(total_count) * 100.0), 1) if total_count else 0.0
 
 
+def get_closed_trade_journal(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame()
+    closed = df[df["outcome"].fillna("OPEN") != "OPEN"].copy()
+    if closed.empty:
+        return closed
+    for col in ["rr", "net_profit_eur", "conservative_net", "score", "entry", "stop", "target", "current_price"]:
+        if col in closed.columns:
+            closed[col] = pd.to_numeric(closed[col], errors="coerce")
+    closed["is_win"] = closed["outcome"].astype(str).isin(["TP"])
+    closed["is_loss"] = closed["outcome"].astype(str).isin(["SL"])
+    closed["is_be"] = closed["outcome"].astype(str).isin(["BE"])
+    closed["is_manual"] = closed["outcome"].astype(str).isin(["MANUAL_EXIT"])
+    closed["setup_family"] = closed["entry_variant"].astype(str).replace({
+        "early_price_action": "early_price_action",
+        "retest_breakout": "retest_breakout",
+        "manual": "manual",
+    })
+    closed["setup_family"] = closed["setup_family"].where(closed["setup_family"].isin(["early_price_action", "retest_breakout", "manual"]), closed["plan_type"].astype(str))
+    return closed
+
+
 def summarize_group_performance(df: pd.DataFrame, group_col: str, min_trades: int = 1) -> pd.DataFrame:
     if df is None or df.empty or group_col not in df.columns:
         return pd.DataFrame(columns=[group_col, "trades", "winrate_pct", "tp", "sl", "be", "manual_exit", "avg_rr", "avg_score"])
@@ -606,11 +454,11 @@ def build_tp_sl_feedback(closed_df: pd.DataFrame) -> Dict[str, List[str]]:
     be_count = int(closed_df["is_be"].sum())
     manual_count = int(closed_df["is_manual"].sum())
 
-    if tp_count >= max(JOURNAL_CONFIG["learning"]["min_tp_or_sl_count"], sl_count + 1):
+    if tp_count >= max(3, sl_count + 1):
         good.append("TP wordt relatief vaak geraakt; target-structuur lijkt bruikbaar.")
-    if sl_count >= max(JOURNAL_CONFIG["learning"]["min_tp_or_sl_count"], tp_count + 1):
+    if sl_count >= max(3, tp_count + 1):
         bad.append("SL wordt vaker geraakt dan TP; kijk kritisch naar entrykwaliteit of stopruimte.")
-    if (be_count + manual_count) >= max(JOURNAL_CONFIG["learning"]["min_tp_or_sl_count"], int(total * JOURNAL_CONFIG["learning"]["be_manual_warning_ratio"])):
+    if (be_count + manual_count) >= max(3, int(total * 0.35)):
         bad.append("Veel BE/manual exits; entries lijken soms goed maar exits of TP-structuur kunnen beter.")
     if tp_count >= 2 and (be_count + manual_count) >= 2:
         bad.append("Een deel van de trades komt wel op gang, maar wordt niet netjes afgerond; TP staat mogelijk te ambitieus of management is te vroeg.")
@@ -620,9 +468,9 @@ def build_tp_sl_feedback(closed_df: pd.DataFrame) -> Dict[str, List[str]]:
         if not loc.empty:
             a_row = loc[loc["location_quality"] == "A_ENTRY"]
             late_row = loc[loc["location_quality"] == "LATE"]
-            if not a_row.empty and float(a_row.iloc[0]["winrate_pct"]) >= JOURNAL_CONFIG["learning"]["a_entry_good_winrate_pct"]:
+            if not a_row.empty and float(a_row.iloc[0]["winrate_pct"]) >= 50:
                 good.append("A_ENTRY setups presteren het best; dicht op de zone blijven lijkt goed te werken.")
-            if not late_row.empty and float(late_row.iloc[0]["lossrate_pct"]) >= JOURNAL_CONFIG["learning"]["late_bad_lossrate_pct"]:
+            if not late_row.empty and float(late_row.iloc[0]["lossrate_pct"]) >= 45:
                 bad.append("LATE entries verliezen relatief vaak; je bent daar waarschijnlijk te laat in de move.")
             b_row = loc[loc["location_quality"] == "B_ENTRY"]
             if not b_row.empty and float(b_row.iloc[0]["sl"]) >= float(b_row.iloc[0]["tp"]) and int(b_row.iloc[0]["trades"]) >= 3:
@@ -635,12 +483,116 @@ def build_tp_sl_feedback(closed_df: pd.DataFrame) -> Dict[str, List[str]]:
             if "early_price_action" in fam.index and "retest_breakout" in fam.index:
                 early_wr = float(fam.loc["early_price_action", "winrate_pct"])
                 retest_wr = float(fam.loc["retest_breakout", "winrate_pct"])
-                if early_wr >= retest_wr + JOURNAL_CONFIG["learning"]["setup_comparison_delta_pct"]:
+                if early_wr >= retest_wr + 10:
                     good.append("Early price-action werkt duidelijk beter dan retest-breakout in jouw data.")
-                elif retest_wr >= early_wr + JOURNAL_CONFIG["learning"]["setup_comparison_delta_pct"]:
+                elif retest_wr >= early_wr + 10:
                     good.append("Retest-breakout werkt duidelijk beter dan early price-action in jouw data.")
 
     return {"good": good[:4], "bad": bad[:4]}
+
+
+def build_learning_engine(journal_df: pd.DataFrame, daily_df: pd.DataFrame) -> Dict[str, object]:
+    closed_df = get_closed_trade_journal(journal_df)
+    result: Dict[str, object] = {
+        "closed_df": closed_df,
+        "coin_perf": summarize_group_performance(closed_df, "coin"),
+        "timeframe_perf": summarize_group_performance(closed_df, "scanner_tf"),
+        "setup_perf": summarize_group_performance(closed_df, "setup_family"),
+        "side_perf": summarize_group_performance(closed_df, "side"),
+        "context_perf": summarize_group_performance(closed_df, "context"),
+        "location_perf": summarize_group_performance(closed_df, "location_quality"),
+        "good_insights": [],
+        "bad_insights": [],
+        "top_working": [],
+        "top_improve": [],
+    }
+
+    if closed_df.empty:
+        return result
+
+    coin_perf = result["coin_perf"]
+    timeframe_perf = result["timeframe_perf"]
+    setup_perf = result["setup_perf"]
+    side_perf = result["side_perf"]
+    context_perf = result["context_perf"]
+    location_perf = result["location_perf"]
+
+    insights_good: List[str] = []
+    insights_bad: List[str] = []
+
+    if not coin_perf.empty:
+        top_coin = coin_perf.iloc[0]
+        insights_good.append(f"{top_coin['coin']} werkt nu het best ({int(top_coin['trades'])} trades, {float(top_coin['winrate_pct']):.1f}% winrate).")
+        weak_coin = coin_perf.sort_values(["winrate_pct", "trades"], ascending=[True, False]).iloc[0]
+        if int(weak_coin["trades"]) >= 2:
+            insights_bad.append(f"{weak_coin['coin']} presteert zwakker ({int(weak_coin['trades'])} trades, {float(weak_coin['winrate_pct']):.1f}% winrate).")
+
+    if not timeframe_perf.empty:
+        best_tf = timeframe_perf.iloc[0]
+        insights_good.append(f"Timeframe {best_tf['scanner_tf']} werkt het best ({float(best_tf['winrate_pct']):.1f}% winrate).")
+        weak_tf = timeframe_perf.sort_values(["winrate_pct", "trades"], ascending=[True, False]).iloc[0]
+        if int(weak_tf["trades"]) >= 2:
+            insights_bad.append(f"Timeframe {weak_tf['scanner_tf']} blijft achter; daar moet je scherper op entries/exits letten.")
+
+    if not setup_perf.empty:
+        best_setup = setup_perf.iloc[0]
+        insights_good.append(f"{best_setup['setup_family']} is je sterkste setup-type ({float(best_setup['winrate_pct']):.1f}% winrate).")
+        weak_setup = setup_perf.sort_values(["winrate_pct", "trades"], ascending=[True, False]).iloc[0]
+        if int(weak_setup["trades"]) >= 2:
+            insights_bad.append(f"{weak_setup['setup_family']} presteert zwakker; check of deze setup minder goed bij jouw stijl past.")
+
+    if not side_perf.empty and len(side_perf) >= 2:
+        best_side = side_perf.iloc[0]
+        weak_side = side_perf.sort_values(["winrate_pct", "trades"], ascending=[True, False]).iloc[0]
+        insights_good.append(f"{best_side['side']} trades doen het beter ({float(best_side['winrate_pct']):.1f}% winrate).")
+        if best_side["side"] != weak_side["side"] and int(weak_side["trades"]) >= 2:
+            insights_bad.append(f"{weak_side['side']} trades lopen achter; misschien past de markt daar minder goed bij of blokkeer je te weinig.")
+
+    if not context_perf.empty:
+        good_context = context_perf.iloc[0]
+        insights_good.append(f"Context '{good_context['context']}' werkt relatief goed ({float(good_context['winrate_pct']):.1f}% winrate).")
+        weak_context = context_perf.sort_values(["winrate_pct", "trades"], ascending=[True, False]).iloc[0]
+        if int(weak_context["trades"]) >= 2:
+            insights_bad.append(f"Context '{weak_context['context']}' geeft zwakkere resultaten; daar beter filteren.")
+
+    if not location_perf.empty:
+        good_loc = location_perf.iloc[0]
+        insights_good.append(f"Location {good_loc['location_quality']} werkt het best ({float(good_loc['winrate_pct']):.1f}% winrate).")
+        weak_loc = location_perf.sort_values(["winrate_pct", "trades"], ascending=[True, False]).iloc[0]
+        if int(weak_loc["trades"]) >= 2:
+            insights_bad.append(f"Location {weak_loc['location_quality']} presteert zwak; entries zijn daar waarschijnlijk minder scherp.")
+
+    tp_sl_feedback = build_tp_sl_feedback(closed_df)
+    insights_good.extend(tp_sl_feedback["good"])
+    insights_bad.extend(tp_sl_feedback["bad"])
+
+    if daily_df is not None and not daily_df.empty:
+        daily_tmp = daily_df.copy()
+        daily_tmp["pnl_pct"] = pd.to_numeric(daily_tmp["pnl_pct"], errors="coerce").fillna(0.0)
+        daily_tmp["pnl_eur"] = pd.to_numeric(daily_tmp["pnl_eur"], errors="coerce").fillna(0.0)
+        if float(daily_tmp["pnl_pct"].mean()) > 0:
+            insights_good.append(f"Je gemiddelde dagresultaat staat positief ({daily_tmp['pnl_pct'].mean():.2f}% per entry).")
+        if int((daily_tmp["result_type"].astype(str) == "NO_TRADE").sum()) > int(len(daily_tmp) * 0.4):
+            insights_bad.append("Je hebt relatief veel no-trade dagen; misschien filter je te hard of wacht je te lang.")
+
+    # dedupe while keeping order
+    def _dedupe(items: List[str]) -> List[str]:
+        seen = set()
+        out = []
+        for item in items:
+            if item and item not in seen:
+                seen.add(item)
+                out.append(item)
+        return out
+
+    insights_good = _dedupe(insights_good)
+    insights_bad = _dedupe(insights_bad)
+
+    result["good_insights"] = insights_good[:6]
+    result["bad_insights"] = insights_bad[:6]
+    result["top_working"] = insights_good[:3]
+    result["top_improve"] = insights_bad[:3]
+    return result
 
 
 # =========================================================
@@ -657,7 +609,7 @@ ADVANCED_JOURNAL_COLUMNS = [
 ]
 ADVANCED_TEXT_COLUMNS = ["plan_mode_active", "plan_preplaced", "zone_touch_before_signal", "fill_status", "sl_too_tight_flag", "late_signal_flag"]
 ADVANCED_NUMERIC_COLUMNS = ["tp_miss_pct"]
-FILL_STATUS_OPTIONS = JOURNAL_CONFIG["fill_status_options"]
+FILL_STATUS_OPTIONS = ["UNKNOWN", "NOT_PLACED", "PENDING", "FILLED", "PARTIAL", "MISSED", "CANCELLED"]
 
 
 def _journal_base_columns_v11() -> List[str]:
@@ -779,13 +731,10 @@ def _infer_sl_too_tight_flag(metrics: Optional[Dict[str, object]], selected_resu
     rr = _safe_float(metrics.get("rr"), 0.0)
     risk_pct = _safe_float(metrics.get("risk_pct_price"), 0.0)
     tf = str((selected_result or {}).get("timeframe_label", ""))
-    min_risk = RISK_CONFIG["min_risk_pct_by_timeframe"].get(tf, RISK_CONFIG["default_min_risk_pct"])
+    min_risk = {"1m": 0.05, "5m": 0.09, "15m": 0.14, "30m": 0.20, "1h": 0.30, "4h": 0.50, "1d": 0.80}.get(tf, 0.10)
     if risk_pct > 0 and risk_pct < min_risk:
         return "YES"
-    if (
-        rr > RISK_CONFIG["sl_too_tight_rr_threshold"]
-        and risk_pct < min_risk * RISK_CONFIG["sl_too_tight_rr_risk_multiplier"]
-    ):
+    if rr > 4.0 and risk_pct < min_risk * 1.35:
         return "YES"
     if risk_pct > 0:
         return "NO"
@@ -1188,7 +1137,7 @@ def build_learning_engine(journal_df: pd.DataFrame, daily_df: pd.DataFrame) -> D
         daily_tmp["pnl_eur"] = pd.to_numeric(daily_tmp["pnl_eur"], errors="coerce").fillna(0.0)
         if float(daily_tmp["pnl_pct"].mean()) > 0:
             insights_good.append(f"Je gemiddelde dagresultaat staat positief ({daily_tmp['pnl_pct'].mean():.2f}% per entry).")
-        if int((daily_tmp["result_type"].astype(str) == "NO_TRADE").sum()) > int(len(daily_tmp) * JOURNAL_CONFIG["learning"]["no_trade_day_warning_ratio"]):
+        if int((daily_tmp["result_type"].astype(str) == "NO_TRADE").sum()) > int(len(daily_tmp) * 0.4):
             insights_bad.append("Je hebt relatief veel no-trade dagen; misschien filter je te hard of wacht je te lang.")
 
     def _dedupe(items: List[str]) -> List[str]:
@@ -1268,8 +1217,16 @@ def safe_pct_distance(value: Optional[float], reference: Optional[float]) -> Opt
         return None
     return ((float(value) - float(reference)) / float(reference)) * 100
 
-# Fase 2: zonebreedtes staan centraal in ZONE_CONFIG.
-ZONE_BASE_WIDTH_PCT = ZONE_CONFIG["base_width_pct"]
+ZONE_BASE_WIDTH_PCT = {
+    # v7.12.4: basis-zones kleiner gemaakt.
+    # De oude waarden maakten vooral coins met weinig volatiliteit (XLM/XRP) veel te brede zones.
+    "BTC": 0.12,
+    "ETH": 0.15,
+    "SOL": 0.22,
+    "TAO": 0.34,
+    "XRP": 0.16,
+    "XLM": 0.14,
+}
 
 def get_coin_zone_width_pct(coin: str, vol_profile: Optional[Dict[str, float | str]] = None, zone_kind: str = "entry") -> float:
     """
@@ -1278,21 +1235,20 @@ def get_coin_zone_width_pct(coin: str, vol_profile: Optional[Dict[str, float | s
     De vorige minimum clamp van 0.10% + hoge coin-bases maakte intraday fills te vaag.
     """
     coin = str(coin).upper()
-    base = float(ZONE_CONFIG["base_width_pct"].get(coin, ZONE_CONFIG["default_base_width_pct"]))
-    avg_range_pct = float(
-        (vol_profile or {}).get("avg_range_pct", ZONE_CONFIG["default_avg_range_pct"])
-        or ZONE_CONFIG["default_avg_range_pct"]
-    )
+    base = float(ZONE_BASE_WIDTH_PCT.get(coin, 0.18))
+    avg_range_pct = float((vol_profile or {}).get("avg_range_pct", 0.8) or 0.8)
 
     # Volatiliteit schaalt de zone: rustig = dunner, wild = iets breder.
-    vol_factor = max(
-        ZONE_CONFIG["vol_factor_min"],
-        min(ZONE_CONFIG["vol_factor_max"], avg_range_pct / ZONE_CONFIG["vol_factor_normalizer"]),
-    )
-    width = base * vol_factor * ZONE_CONFIG["kind_factor"].get(zone_kind, ZONE_CONFIG["kind_factor"]["entry"])
+    vol_factor = max(0.45, min(1.35, avg_range_pct / 1.15))
+    width = base * vol_factor
 
-    min_width = ZONE_CONFIG["min_width_pct_by_kind"].get(zone_kind, ZONE_CONFIG["min_width_pct_by_kind"]["entry"])
-    max_width = ZONE_CONFIG["max_width_pct_by_kind"].get(zone_kind, ZONE_CONFIG["max_width_pct_by_kind"]["entry"])
+    if zone_kind == "target":
+        width *= 0.45
+    elif zone_kind == "invalidation":
+        width *= 0.55
+
+    min_width = {"entry": 0.035, "target": 0.025, "invalidation": 0.030}.get(zone_kind, 0.035)
+    max_width = {"entry": 0.55, "target": 0.30, "invalidation": 0.38}.get(zone_kind, 0.55)
     return round(max(min_width, min(max_width, width)), 3)
 
 def build_price_zone(center: Optional[float], width_pct: float) -> Optional[Dict[str, float]]:
@@ -1362,11 +1318,7 @@ def split_entry_zone_into_ladder(
         return []
 
     if weights is None:
-        weights = (
-            ZONE_CONFIG["ladder_default_weights_pct"]
-            if steps == ZONE_CONFIG["ladder_default_steps"]
-            else [round(100.0 / steps, 2)] * steps
-        )
+        weights = [40.0, 35.0, 25.0] if steps == 3 else [round(100.0 / steps, 2)] * steps
     if len(weights) != steps:
         weights = [round(100.0 / steps, 2)] * steps
 
@@ -1474,8 +1426,8 @@ def build_trade_zone_map(
         vol_profile=vol_profile,
         source_timeframe=invalidation_source_timeframe,
     )
-    ladder = split_entry_zone_into_ladder(entry_zone_raw, side=side, steps=ZONE_CONFIG["ladder_default_steps"])
-    limit_order_ladder = build_limit_order_ladder(entry_zone, side=side, steps=ZONE_CONFIG["ladder_default_steps"])
+    ladder = split_entry_zone_into_ladder(entry_zone_raw, side=side, steps=3)
+    limit_order_ladder = build_limit_order_ladder(entry_zone, side=side, steps=3)
     scale_out_plan = build_scale_out_plan(
         side=side,
         entry_price=entry_level,
@@ -1572,8 +1524,8 @@ def recalculate_speelveld_for_live_price(speelveld: Optional[Dict[str, object]],
         resistance_center = float(resistance_zone["center"])
         range_size = resistance_center - support_center
         updated["midrange_zone"] = {
-            "low": support_center + range_size * (PLAN_CONFIG["midrange_low_pct"] / 100.0),
-            "high": support_center + range_size * (PLAN_CONFIG["midrange_high_pct"] / 100.0),
+            "low": support_center + range_size * 0.40,
+            "high": support_center + range_size * 0.60,
             "center": support_center + range_size * 0.50,
             "width_pct": 0.0,
         }
@@ -1604,14 +1556,14 @@ def recalculate_speelveld_for_live_price(speelveld: Optional[Dict[str, object]],
             "short_plan_allowed": True,
             "reason": "Prijs zit live in de verkoopzone. Timing/confirmatie komt pas daarna.",
         })
-    elif PLAN_CONFIG["midrange_low_pct"] <= progress <= PLAN_CONFIG["midrange_high_pct"]:
+    elif 40.0 <= progress <= 60.0:
         updated.update({
             "position_label": "NO_TRADE_MIDRANGE",
             "action_label": "Wachten",
             "trade_allowed": False,
             "reason": "Prijs zit live midden in de range. Geen voordeelzone; niet forceren.",
         })
-    elif progress < PLAN_CONFIG["midrange_low_pct"]:
+    elif progress < 40.0:
         updated.update({
             "position_label": "NEAR_SUPPORT_SIDE",
             "action_label": "Wachten op support-zone",
@@ -1645,20 +1597,6 @@ def inject_live_price_into_selected_result(
     if isinstance(result.get("speelveld"), dict):
         result["speelveld"] = recalculate_speelveld_for_live_price(result.get("speelveld"), float(live_price))
         result["range_bar_live_updated"] = True
-    if "build_primary_trade_plan" in globals():
-        result["primary_trade_plan"] = build_primary_trade_plan(
-            plan_candidates=result.get("plan_mode_candidates") or [],
-            entry_candidates=result.get("entry_mode_candidates") or [],
-            trade_opportunity=result.get("trade_opportunity") or {},
-            current_price=float(live_price),
-            coin_symbol=str(result.get("coin") or ""),
-            timeframe_label=str(result.get("timeframe_label") or ""),
-            speelveld=result.get("speelveld") or {},
-            context_engine=result.get("context_engine") or {},
-            context_preferred_side=result.get("context_preferred_side"),
-        )
-        if isinstance(result.get("trade_opportunity"), dict):
-            result["trade_opportunity"]["primary_trade_plan"] = result["primary_trade_plan"]
     return result
 
 
@@ -1721,13 +1659,7 @@ def build_speelveld_engine(
     """
     width_pct = get_coin_zone_width_pct(coin_symbol, vol_profile, zone_kind="entry")
     if is_daytrade_timeframe(timeframe_label):
-        width_pct = round(
-            max(
-                ZONE_CONFIG["daytrade_min_width_pct"],
-                width_pct * ZONE_CONFIG["daytrade_width_multiplier"],
-            ),
-            3,
-        )
+        width_pct = round(max(0.025, width_pct * 0.65), 3)
 
     support_zone = _plain_zone(build_price_zone(support_level, width_pct) if support_level is not None else None)
     resistance_zone = _plain_zone(build_price_zone(resistance_level, width_pct) if resistance_level is not None else None)
@@ -1786,8 +1718,8 @@ def build_speelveld_engine(
 
     progress = max(0.0, min(100.0, ((cp - support_center) / range_size) * 100.0))
     result["range_progress_pct"] = round(progress, 1)
-    mid_low = support_center + range_size * (PLAN_CONFIG["midrange_low_pct"] / 100.0)
-    mid_high = support_center + range_size * (PLAN_CONFIG["midrange_high_pct"] / 100.0)
+    mid_low = support_center + range_size * 0.40
+    mid_high = support_center + range_size * 0.60
     result["midrange_zone"] = {"low": mid_low, "high": mid_high, "center": (mid_low + mid_high) / 2, "width_pct": 0.0}
 
     in_support = support_zone["low"] <= cp <= support_zone["high"]
@@ -1809,14 +1741,14 @@ def build_speelveld_engine(
             "short_plan_allowed": True,
             "reason": "Prijs zit in de verkoopzone. Timing/confirmatie komt pas daarna.",
         })
-    elif PLAN_CONFIG["midrange_low_pct"] <= progress <= PLAN_CONFIG["midrange_high_pct"]:
+    elif 40.0 <= progress <= 60.0:
         result.update({
             "position_label": "NO_TRADE_MIDRANGE",
             "action_label": "Wachten",
             "trade_allowed": False,
             "reason": "Prijs zit midden in de range. Geen voordeelzone; niet forceren.",
         })
-    elif progress < PLAN_CONFIG["midrange_low_pct"]:
+    elif progress < 40.0:
         result.update({
             "position_label": "NEAR_SUPPORT_SIDE",
             "action_label": "Wachten op support-zone",
@@ -1840,19 +1772,19 @@ def _range_bar_text(progress: float, side: str) -> str:
     """Korte menselijke uitleg bij de range-balk."""
     side_u = str(side or "LONG").upper()
     if side_u == "SHORT":
-        if progress >= PLAN_CONFIG["range_extreme_high_pct"]:
+        if progress >= 75:
             return "Prijs zit dichtbij resistance: goede kant voor een mogelijke short."
-        if progress <= PLAN_CONFIG["range_extreme_low_pct"]:
+        if progress <= 25:
             return "Prijs zit dichtbij support: minder gunstig voor short; oppassen met najagen."
         return "Prijs zit midden in de range: liever wachten op een duidelijke rand."
 
-    if progress <= PLAN_CONFIG["range_extreme_low_pct"]:
+    if progress <= 25:
         return "Prijs zit dichtbij support: goede kant voor een mogelijke long."
-    if progress >= PLAN_CONFIG["range_extreme_high_pct"]:
+    if progress >= 75:
         return "Prijs zit dichtbij resistance: minder gunstig voor long; oppassen met najagen."
-    if progress < PLAN_CONFIG["midrange_low_pct"]:
+    if progress < 40:
         return "Prijs zit aan de goedkope kant van de range, maar nog niet netjes in de koopzone."
-    if progress > PLAN_CONFIG["midrange_high_pct"]:
+    if progress > 60:
         return "Prijs zit aan de dure kant van de range; liever wachten op betere locatie."
     return "Prijs zit midden in de range: liever wachten op support of resistance."
 
@@ -1895,13 +1827,13 @@ def render_range_position_bar(selected_result: Dict[str, object], side: Optional
         left_color = "#fca5a5"
         mid_color = "#facc15"
         right_color = "#4ade80"
-        title_pct_color = "#4ade80" if progress_f >= PLAN_CONFIG["range_title_green_long_pct"] else ("#facc15" if progress_f >= PLAN_CONFIG["range_title_green_short_pct"] else "#f87171")
+        title_pct_color = "#4ade80" if progress_f >= 65 else ("#facc15" if progress_f >= 35 else "#f87171")
     else:
         gradient = "linear-gradient(90deg, #22c55e 0%, #facc15 50%, #ef4444 100%)"
         left_color = "#4ade80"
         mid_color = "#facc15"
         right_color = "#f87171"
-        title_pct_color = "#4ade80" if progress_f <= PLAN_CONFIG["range_title_green_short_pct"] else ("#facc15" if progress_f <= PLAN_CONFIG["range_title_green_long_pct"] else "#f87171")
+        title_pct_color = "#4ade80" if progress_f <= 35 else ("#facc15" if progress_f <= 65 else "#f87171")
 
     reason = _range_bar_text(progress_f, side_u)
     marker_left = max(0.0, min(100.0, progress_f))
@@ -2391,6 +2323,8 @@ def analyze_price_action_confirmation(
     return result
 
 
+
+
 def build_doopiecash_plan(
     side: str,
     current_price: Optional[float],
@@ -2561,6 +2495,10 @@ def compute_setup_timing(
         "short_timing": short_timing,
     })
     return result
+
+
+
+
 
 
 def _normalize_timing_label(label: Optional[str]) -> str:
@@ -2953,6 +2891,9 @@ def detect_swing_levels(
         "hard_supports": hard_supports[:2],
         "hard_resistances": hard_resistances[:2],
     }
+
+
+
 
 
 def analyze_structure_strength(
@@ -4087,6 +4028,8 @@ def determine_market_context(
     return result
 
 
+
+
 def _calc_directional_efficiency(df: Optional[pd.DataFrame], window: int = 20) -> Dict[str, float]:
     if df is None or len(df) < 6:
         return {"efficiency": 0.0, "up_ratio": 0.5, "body_ratio": 1.0}
@@ -4532,6 +4475,9 @@ def classify_market_context_engine(
     return result
 
 
+
+
+
 def apply_context_trade_permissions(
     context_engine: Dict[str, object],
     current_price: Optional[float],
@@ -4720,30 +4666,6 @@ def build_trade_tab_story(selected_result: Dict[str, object]) -> Dict[str, objec
             "footer": context_reason or "Choppy markt: liever overslaan.",
             "display_best_side": None,
             "display_best_metrics": None,
-        })
-        return story
-
-    primary_plan = selected_result.get("primary_trade_plan") or {}
-    if isinstance(primary_plan, dict) and primary_plan.get("status") in {"READY", "NEAR", "UPCOMING", "MISSED"}:
-        plan_status = str(primary_plan.get("status"))
-        plan_side = str(primary_plan.get("side") or "WAIT")
-        plan_metrics = primary_plan.get("metrics") if isinstance(primary_plan.get("metrics"), dict) else None
-        kind = "success" if plan_status == "READY" else ("error" if plan_status == "MISSED" else "warning")
-        headline_map = {
-            "READY": f"Plan READY: {plan_side}",
-            "NEAR": f"Plan bijna actief: {plan_side}",
-            "UPCOMING": f"Plan klaarzetten: {plan_side}",
-            "MISSED": f"Plan gemist: {plan_side}",
-        }
-        story.update({
-            "status_kind": kind,
-            "headline": headline_map.get(plan_status, f"Plan: {plan_side}"),
-            "summary": str(primary_plan.get("plan_reason") or "De bot toont eerst het vooraf-plan; confirmation is bonus."),
-            "detail": str(primary_plan.get("invalidation_reason") or ""),
-            "plan_text": f"Entry-zone: {fmt_zone(primary_plan.get('entry_zone'))} • SL: {fmt_price_eur(_safe_float(primary_plan.get('stop_loss')))} • TP: {fmt_price_eur(_safe_float(primary_plan.get('take_profit')))}",
-            "footer": "Plan-first actief: confirmation is extra confluence, geen voorwaarde.",
-            "display_best_side": plan_side if plan_side in {"LONG", "SHORT"} else None,
-            "display_best_metrics": plan_metrics if plan_status in {"READY", "NEAR", "UPCOMING"} else None,
         })
         return story
 
@@ -5169,25 +5091,26 @@ def timing_to_score(timing: str) -> float:
     }.get(str(normalized), -8.0)
 
 
+
+
 # =========================================================
 # Phase 6B - Trader Status Engine
 # =========================================================
-TRADER_STATUSES = {"UPCOMING", "NEAR", "PLAN", "READY", "WAIT", "HANDS_OFF", "MISSED", "SCALE_OUT", "BLOCKED", "INVALID", "NO_PLAN"}
+TRADER_STATUSES = {"PLAN", "READY", "WAIT", "HANDS_OFF", "MISSED", "SCALE_OUT", "BLOCKED"}
 
 
 def normalize_trader_status(status: Optional[str]) -> str:
     raw = str(status or "WAIT").strip().upper().replace(" ", "_").replace("-", "_")
     mapping = {
+        "NEAR": "PLAN",
         "WATCH": "WAIT",
-        "DOOPIECASH_READY": "READY",
-        "PLAN_READY": "READY",
-        "PLAN_NEAR": "NEAR",
+        "DOOPIECASH_READY": "PLAN",
+        "PLAN_READY": "PLAN",
+        "PLAN_NEAR": "PLAN",
         "ENTRY_READY": "READY",
         "CONFIRMED_READY": "READY",
         "LOW_PRIORITY": "WAIT",
-        "NO_DATA": "NO_PLAN",
-        "NO PLAN": "NO_PLAN",
-        "NO-PLAN": "NO_PLAN",
+        "NO_DATA": "WAIT",
         "SKIP": "HANDS_OFF",
         "HANDS_OFF": "HANDS_OFF",
         "BLOCKED": "BLOCKED",
@@ -5318,7 +5241,7 @@ def detect_plan_zone_status(
             "distance_to_target_pct": dist_target,
         }
 
-    if dist_target is not None and dist_target <= PLAN_CONFIG["near_target_missed_pct"]:
+    if dist_target is not None and dist_target <= 0.18:
         return {
             "status": "MISSED",
             "action": "Niet chasen",
@@ -5361,7 +5284,7 @@ def suppress_countertrend_plan(
             if preferred == "LONG"
             else "Countertrend onderdrukt: in bearish trend is support eerst target, geen long-entry."
         )
-        item["score"] = float(item.get("score", 0.0) or 0.0) + PLAN_CONFIG["countertrend_block_penalty"]
+        item["score"] = float(item.get("score", 0.0) or 0.0) - 250.0
     return item
 
 
@@ -5424,362 +5347,6 @@ def show_plan_before_reaction(
     return sorted(out, key=lambda x: (bool(x.get("allowed_by_context", False)), _status_rank(x.get("status")), float(x.get("score", 0.0) or 0.0)), reverse=True)
 
 
-def _candidate_pre_trade_plan(candidate: Optional[Dict[str, object]]) -> Dict[str, object]:
-    """Veilige helper: haalt het bestaande plan-object uit een candidate."""
-    if not isinstance(candidate, dict):
-        return {}
-    pre_plan = candidate.get("pre_trade_plan")
-    return pre_plan if isinstance(pre_plan, dict) else {}
-
-
-def _zone_from_candidate_metrics(
-    candidate: Optional[Dict[str, object]],
-    key: str,
-    coin_symbol: str,
-    zone_kind: str,
-) -> Optional[Dict[str, float]]:
-    """Fallback-zone vanuit metrics wanneer een candidate nog geen expliciete zone heeft."""
-    if not isinstance(candidate, dict):
-        return None
-    metrics = candidate.get("metrics") or {}
-    if not isinstance(metrics, dict) or metrics.get(key) is None:
-        return None
-    return build_price_zone(metrics.get(key), get_coin_zone_width_pct(coin_symbol, None, zone_kind))
-
-
-def _float_or_none(value: Optional[object]) -> Optional[float]:
-    try:
-        if value is None:
-            return None
-        return float(value)
-    except Exception:
-        return None
-
-
-def _primary_plan_status_from_zones(
-    current_price: Optional[float],
-    entry_zone: Optional[Dict[str, object]],
-    target_zone: Optional[Dict[str, object]],
-    side: str,
-    raw_status: str,
-    allowed_by_context: bool,
-) -> Tuple[str, str, str, Optional[float], Optional[float], List[str]]:
-    """
-    Fase 3 statuslaag:
-    - plan bestaat eerst
-    - daarna pas bepalen of hij UPCOMING / NEAR / READY / MISSED / INVALID is
-    """
-    warnings: List[str] = []
-    normalized_raw = normalize_trader_status(raw_status)
-    entry_plain = _plain_zone(entry_zone)
-    target_plain = _plain_zone(target_zone)
-
-    if normalized_raw in {"HANDS_OFF", "BLOCKED"} or not allowed_by_context:
-        return (
-            "INVALID",
-            "Geen nieuw plan uitvoeren",
-            "Context blokkeert dit plan; niet forceren.",
-            None,
-            None,
-            ["context_block"],
-        )
-
-    if entry_plain is None:
-        return (
-            "NO_PLAN",
-            "Wachten",
-            "Geen geldige entry-zone beschikbaar.",
-            None,
-            None,
-            ["missing_entry_zone"],
-        )
-
-    if current_price is None:
-        return (
-            "NO_PLAN",
-            "Wachten op prijsdata",
-            "Geen live prijs beschikbaar om planstatus te bepalen.",
-            None,
-            None,
-            ["missing_price"],
-        )
-
-    cp = float(current_price)
-    dist_entry = distance_to_zone_pct(cp, entry_plain)
-    dist_target = distance_to_zone_pct(cp, target_plain) if target_plain is not None else None
-
-    if normalized_raw == "MISSED":
-        return (
-            "MISSED",
-            "Niet chasen",
-            "Bestaande anti-chase/status-engine markeert dit plan als gemist.",
-            dist_entry,
-            dist_target,
-            ["anti_chase_missed"],
-        )
-
-    if dist_target is not None and dist_target <= PLAN_CONFIG["near_target_missed_pct"]:
-        return (
-            "MISSED",
-            "Niet chasen",
-            "Prijs zit al dicht bij target; plan is te laat om nog als nieuwe entry te nemen.",
-            dist_entry,
-            dist_target,
-            ["near_target"],
-        )
-
-    if dist_entry == 0.0:
-        return (
-            "READY",
-            "Entry-zone actief",
-            "Prijs zit in de vooraf bepaalde entry-zone. Confirmatie mag nu alleen extra vertrouwen geven.",
-            dist_entry,
-            dist_target,
-            [],
-        )
-
-    width_pct = abs(float(entry_plain.get("width_pct", 0.0) or 0.0))
-    near_threshold = max(
-        PLAN_CONFIG["near_entry_min_pct"],
-        width_pct * PLAN_CONFIG["near_entry_zone_multiplier"],
-    )
-    if dist_entry is not None and dist_entry <= near_threshold:
-        return (
-            "NEAR",
-            "Plan bijna actief",
-            "Prijs nadert de entry-zone. Niet chasen; wacht op de zone of limit-ladder.",
-            dist_entry,
-            dist_target,
-            [],
-        )
-
-    return (
-        "UPCOMING",
-        "Limit-zone klaarzetten",
-        "Vooraf plan staat klaar rond support/resistance. Entry-confirmation is nog niet nodig.",
-        dist_entry,
-        dist_target,
-        [],
-    )
-
-
-def _primary_plan_confirmation_bonus(
-    side: str,
-    entry_candidates: List[Dict[str, object]],
-) -> Dict[str, object]:
-    """Zoekt confirmation op dezelfde richting, maar gebruikt dit alleen als bonus-info."""
-    side_u = str(side or "").upper()
-    matching = []
-    for candidate in entry_candidates or []:
-        if str(candidate.get("side", "")).upper() != side_u:
-            continue
-        item = dict(candidate)
-        item_status = normalize_trader_status(item.get("status"))
-        confirmed = bool((item.get("setup_detection") or {}).get("confirmed", False))
-        item["_confirmation_sort"] = (
-            1 if item_status == "READY" else 0,
-            1 if confirmed else 0,
-            float(item.get("confirmation_score", 0.0) or 0.0),
-            float(item.get("entry_rank_score", item.get("score", 0.0)) or 0.0),
-        )
-        matching.append(item)
-
-    if not matching:
-        return {
-            "present": False,
-            "score": 0.0,
-            "label": "geen confirmation",
-            "reason": "Nog geen entry-confirmation; plan blijft wel geldig als vooraf-plan.",
-        }
-
-    best = sorted(matching, key=lambda x: x.get("_confirmation_sort", (0, 0, 0.0, 0.0)), reverse=True)[0]
-    status = normalize_trader_status(best.get("status"))
-    confirmed = bool((best.get("setup_detection") or {}).get("confirmed", False)) or status == "READY"
-    score = float(best.get("confirmation_score", 0.0) or (100.0 if status == "READY" else 0.0))
-    return {
-        "present": bool(confirmed),
-        "score": round(score, 1),
-        "label": best.get("confirmation_label") or ("confirmation aanwezig" if confirmed else "nog geen confirmation"),
-        "reason": str((best.get("setup_detection") or {}).get("reason") or best.get("reason") or ""),
-        "candidate": best,
-    }
-
-
-def build_primary_trade_plan(
-    plan_candidates: List[Dict[str, object]],
-    entry_candidates: List[Dict[str, object]],
-    trade_opportunity: Optional[Dict[str, object]],
-    current_price: Optional[float],
-    coin_symbol: str,
-    timeframe_label: str,
-    speelveld: Optional[Dict[str, object]],
-    context_engine: Optional[Dict[str, object]],
-    context_preferred_side: Optional[str],
-) -> Dict[str, object]:
-    """
-    Fase 3: centrale plan-first laag.
-
-    Deze functie kiest eerst het beste vooraf-plan en maakt daar één uniform plan-object van.
-    Entry-confirmation wordt pas daarna toegevoegd als bonus, niet als voorwaarde.
-    """
-    trade_opportunity = trade_opportunity or {}
-    ranked_plans = trade_opportunity.get("ranked_plan_candidates") or rank_plan_candidates(plan_candidates or [])
-    best_plan = trade_opportunity.get("best_plan_candidate") or (ranked_plans[0] if ranked_plans else None)
-
-    if not isinstance(best_plan, dict):
-        state = str((context_engine or {}).get("market_state", ""))
-        reason = "Geen bruikbare support/resistance plan-candidate gevonden."
-        if state in {"hands_off", "choppy", "compressie"}:
-            reason = "Marktcontext is niet schoon genoeg voor een nieuw vooraf-plan."
-        return {
-            "active": False,
-            "side": "WAIT",
-            "status": "NO_PLAN",
-            "entry_zone": None,
-            "entry_price": None,
-            "entry_center": None,
-            "stop_loss": None,
-            "take_profit": None,
-            "invalidation_reason": reason,
-            "plan_reason": reason,
-            "distance_to_entry_pct": None,
-            "distance_to_tp_pct": None,
-            "risk_reward": None,
-            "source_timeframe": timeframe_label,
-            "confirmation_bonus": _primary_plan_confirmation_bonus("WAIT", entry_candidates),
-            "warning_flags": ["no_plan"],
-            "action_label": "Wachten",
-            "candidate": None,
-        }
-
-    side = str(best_plan.get("side") or context_preferred_side or "WAIT").upper()
-    pre_plan = _candidate_pre_trade_plan(best_plan)
-    metrics = best_plan.get("metrics") or {}
-
-    entry_zone = pre_plan.get("entry_zone") or _zone_from_candidate_metrics(best_plan, "entry", coin_symbol, "entry")
-    target_zone = pre_plan.get("target_zone") or _zone_from_candidate_metrics(best_plan, "target", coin_symbol, "target")
-    invalidation_zone = pre_plan.get("invalidation_zone") or _zone_from_candidate_metrics(best_plan, "stop", coin_symbol, "invalidation")
-
-    raw_status = str(pre_plan.get("status") or best_plan.get("status") or "WAIT")
-    status, action, reason, dist_entry, dist_target, flags = _primary_plan_status_from_zones(
-        current_price=current_price,
-        entry_zone=entry_zone,
-        target_zone=target_zone,
-        side=side,
-        raw_status=raw_status,
-        allowed_by_context=bool(best_plan.get("allowed_by_context", False)),
-    )
-
-    confirmation_bonus = _primary_plan_confirmation_bonus(side, entry_candidates)
-
-    entry_plain = _plain_zone(entry_zone)
-    target_plain = _plain_zone(target_zone)
-    invalidation_plain = _plain_zone(invalidation_zone)
-
-    entry_price = _float_or_none(metrics.get("entry")) if isinstance(metrics, dict) else None
-    if entry_price is None and entry_plain:
-        entry_price = _zone_entry_price(entry_plain, side)
-    stop_loss = _float_or_none(metrics.get("stop")) if isinstance(metrics, dict) else None
-    if stop_loss is None and invalidation_plain:
-        stop_loss = _zone_stop_price(entry_plain, side, coin_symbol, None) if entry_plain else None
-    take_profit = _float_or_none(metrics.get("target")) if isinstance(metrics, dict) else None
-    if take_profit is None and target_plain:
-        take_profit = _zone_target_price(target_plain, side)
-
-    rr = _float_or_none(metrics.get("rr")) if isinstance(metrics, dict) else None
-    if rr is None and entry_price is not None and stop_loss is not None and take_profit is not None:
-        if side == "LONG" and entry_price > stop_loss:
-            rr = max((take_profit - entry_price) / (entry_price - stop_loss), 0.0)
-        elif side == "SHORT" and stop_loss > entry_price:
-            rr = max((entry_price - take_profit) / (stop_loss - entry_price), 0.0)
-
-    if status in {"MISSED", "INVALID", "NO_PLAN"}:
-        flags = list(dict.fromkeys(flags + [status.lower()]))
-
-    if confirmation_bonus.get("present"):
-        plan_reason = f"{reason} Confirmation is aanwezig als bonus, maar het plan bestond al vooraf."
-    else:
-        plan_reason = reason
-
-    return {
-        "active": status in {"UPCOMING", "NEAR", "READY", "MISSED"},
-        "side": side if side in {"LONG", "SHORT"} else "WAIT",
-        "status": status,
-        "entry_zone": entry_zone,
-        "entry_price": entry_price,
-        "entry_center": float(entry_plain["center"]) if entry_plain else entry_price,
-        "stop_loss": stop_loss,
-        "take_profit": take_profit,
-        "invalidation_zone": invalidation_zone,
-        "target_zone": target_zone,
-        "invalidation_reason": (
-            "Plan ongeldig als prijs de invalidatie/SL-zone breekt of als target al geraakt is."
-            if status not in {"INVALID", "NO_PLAN"} else reason
-        ),
-        "plan_reason": plan_reason,
-        "distance_to_entry_pct": dist_entry,
-        "distance_to_tp_pct": dist_target,
-        "risk_reward": rr,
-        "source_timeframe": str((pre_plan.get("source_timeframe") or best_plan.get("source_timeframe") or timeframe_label)),
-        "confirmation_bonus": confirmation_bonus,
-        "warning_flags": flags,
-        "action_label": action,
-        "candidate": best_plan,
-        "metrics": metrics if isinstance(metrics, dict) else None,
-        "ladder": pre_plan.get("limit_order_ladder") or [],
-        "plan_first_engine": True,
-    }
-
-
-def render_primary_trade_plan_card(primary_plan: Optional[Dict[str, object]]) -> None:
-    """Compacte plan-first kaart voor bovenaan de Trade-tab."""
-    if not isinstance(primary_plan, dict):
-        st.info("Eerstvolgende plan: nog niet beschikbaar.")
-        return
-
-    status = str(primary_plan.get("status") or "NO_PLAN")
-    side = str(primary_plan.get("side") or "WAIT")
-    action = str(primary_plan.get("action_label") or "Wachten")
-    icon = {
-        "READY": "🟢",
-        "NEAR": "🟡",
-        "UPCOMING": "🟡",
-        "MISSED": "🔴",
-        "INVALID": "🔴",
-        "NO_PLAN": "🔵",
-    }.get(status, "🔵")
-
-    st.markdown(f"### {icon} Eerstvolgende plan: {side} — {status}")
-    st.caption(action)
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Entry", fmt_price_eur(_safe_float(primary_plan.get("entry_price"))) if primary_plan.get("entry_price") is not None else "-")
-    c2.metric("Stop-loss", fmt_price_eur(_safe_float(primary_plan.get("stop_loss"))) if primary_plan.get("stop_loss") is not None else "-")
-    c3.metric("Take-profit", fmt_price_eur(_safe_float(primary_plan.get("take_profit"))) if primary_plan.get("take_profit") is not None else "-")
-    rr = primary_plan.get("risk_reward")
-    c4.metric("RR", f"1 : {_safe_float(rr):.2f}" if rr is not None else "-")
-
-    z1, z2, z3 = st.columns(3)
-    z1.markdown(f"**Entry-zone**  \n{fmt_zone(primary_plan.get('entry_zone'))}")
-    z2.markdown(f"**Invalidatie**  \n{fmt_zone(primary_plan.get('invalidation_zone'))}")
-    z3.markdown(f"**Target-zone**  \n{fmt_zone(primary_plan.get('target_zone'))}")
-
-    d1, d2, d3 = st.columns(3)
-    dist_entry = primary_plan.get("distance_to_entry_pct")
-    dist_tp = primary_plan.get("distance_to_tp_pct")
-    confirmation = primary_plan.get("confirmation_bonus") or {}
-    d1.metric("Afstand entry", f"{_safe_float(dist_entry):.2f}%" if dist_entry is not None else "-")
-    d2.metric("Afstand TP", f"{_safe_float(dist_tp):.2f}%" if dist_tp is not None else "-")
-    d3.metric("Confirmation", "aanwezig" if confirmation.get("present") else "nog niet")
-
-    st.write(f"**Waarom:** {primary_plan.get('plan_reason') or '-'}")
-    st.write(f"**Ongeldig als:** {primary_plan.get('invalidation_reason') or '-'}")
-    if confirmation.get("reason"):
-        st.caption(f"Confirmation-bonus: {confirmation.get('label')} • {confirmation.get('reason')}")
-    else:
-        st.caption(f"Confirmation-bonus: {confirmation.get('label', 'geen confirmation')}")
-
-
 # =========================================================
 # Phase 7 - Anti Chase Engine
 # =========================================================
@@ -5825,9 +5392,9 @@ def detect_impulse_chase_risk(
     avg_range_pct = float((vol_profile or {}).get("avg_range_pct", 1.0) or 1.0)
 
     # Lower TF mag strakker zijn; hogere TF iets ruimer.
-    max_extension_pct = ANTI_CHASE_CONFIG["max_extension_pct_by_timeframe"].get(tf, ANTI_CHASE_CONFIG["default_max_extension_pct"])
-    max_extension_pct = max(max_extension_pct, avg_range_pct * ANTI_CHASE_CONFIG["extension_volatility_factor"])
-    impulse_body_ratio_limit = ANTI_CHASE_CONFIG["impulse_body_ratio_by_timeframe"].get(tf, ANTI_CHASE_CONFIG["default_impulse_body_ratio"])
+    max_extension_pct = {"1m": 0.22, "5m": 0.35, "15m": 0.55, "30m": 0.75, "1h": 1.10, "4h": 1.80, "1d": 2.80}.get(tf, 0.75)
+    max_extension_pct = max(max_extension_pct, avg_range_pct * 0.45)
+    impulse_body_ratio_limit = {"1m": 1.75, "5m": 1.85, "15m": 2.00, "30m": 2.10, "1h": 2.20, "4h": 2.35, "1d": 2.50}.get(tf, 2.0)
 
     if side_l == "long":
         extension_pct = ((cp - entry) / cp) * 100.0
@@ -5842,10 +5409,10 @@ def detect_impulse_chase_risk(
         if total_move > 0:
             if side_l == "long":
                 progress_pct = ((cp - entry) / total_move) * 100.0
-                target_almost_hit = cp >= entry + total_move * ANTI_CHASE_CONFIG["target_almost_hit_move_fraction"]
+                target_almost_hit = cp >= entry + total_move * 0.75
             else:
                 progress_pct = ((entry - cp) / total_move) * 100.0
-                target_almost_hit = cp <= entry - total_move * ANTI_CHASE_CONFIG["target_almost_hit_move_fraction"]
+                target_almost_hit = cp <= entry - total_move * 0.75
             result["progress_pct"] = round(float(progress_pct), 2)
             result["target_almost_hit"] = bool(target_almost_hit)
 
@@ -5863,7 +5430,7 @@ def detect_impulse_chase_risk(
         result["impulse_active"] = bool((side_l == "long" and bullish_impulse) or (side_l == "short" and bearish_impulse))
 
         if target_level is not None:
-            recent_window = ANTI_CHASE_CONFIG["recent_target_hit_window_by_tf"].get(tf, ANTI_CHASE_CONFIG["default_recent_target_hit_window"])
+            recent_window = {"1m": 12, "5m": 10, "15m": 8, "30m": 6, "1h": 5}.get(tf, 8)
             r = df.tail(min(len(df), recent_window))
             if side_l == "long":
                 result["target_recently_hit"] = bool(float(r["high"].max()) >= float(target_level))
@@ -5884,7 +5451,7 @@ def detect_impulse_chase_risk(
             "status": "HANDS_OFF",
             "reason": "Impuls-candle actief en prijs is al te ver van de zone; niet chasen.",
         })
-    elif bool(result["target_almost_hit"]) or (progress_pct is not None and progress_pct >= ANTI_CHASE_CONFIG["missed_progress_pct"]):
+    elif bool(result["target_almost_hit"]) or (progress_pct is not None and progress_pct >= 70):
         result.update({
             "chase_risk": True,
             "status": "MISSED",
@@ -6219,25 +5786,24 @@ def score_tp_realism(
     dist_pct = abs(target - entry) / entry * 100.0
     tf = str(timeframe_label)
     avg_range_pct = float((vol_profile or {}).get("avg_range_pct", 1.0) or 1.0)
-    target_cfg = SCORING_CONFIG["target_realism"]
-    min_dist = target_cfg["min_dist_pct_by_tf"].get(tf, target_cfg["default_min_dist_pct"])
-    max_dist = target_cfg["realism_max_dist_pct_by_tf"].get(tf, target_cfg["realism_default_max_dist_pct"])
-    max_dist = max(max_dist, avg_range_pct * target_cfg["realism_max_dist_volatility_factor"])
+    min_dist = {"1m": 0.025, "5m": 0.045, "15m": 0.070, "30m": 0.16, "1h": 0.25, "4h": 0.55, "1d": 0.90}.get(tf, 0.20)
+    max_dist = {"1m": 0.42, "5m": 0.70, "15m": 1.10, "30m": 2.10, "1h": 3.20, "4h": 6.50, "1d": 12.0}.get(tf, 2.0)
+    max_dist = max(max_dist, avg_range_pct * 1.35)
 
-    score = target_cfg["base_score"]
+    score = 70.0
     reason = "TP komt uit eerstvolgende logische structuurzone."
     if dist_pct < min_dist:
-        score += target_cfg["too_close_penalty"]
+        score -= 35.0
         reason = "TP ligt te dicht op entry; weinig ruimte na fees/ruis."
     elif dist_pct > max_dist:
-        score += target_cfg["too_far_penalty"]
+        score -= 40.0
         reason = "TP ligt te ver voor deze timeframe; mogelijk wensdenken."
     elif "micro" in str(candidate_source):
-        score += target_cfg["micro_bonus"]
+        score += 12.0
     elif "primary" in str(candidate_source):
-        score += target_cfg["primary_bonus"]
+        score += 8.0
 
-    quality = "good" if score >= target_cfg["good_score"] else ("ok" if score >= target_cfg["ok_score"] else "weak")
+    quality = "good" if score >= 70 else ("ok" if score >= 45 else "weak")
     return {"score": round(max(0.0, min(100.0, score)), 1), "quality": quality, "distance_pct": round(dist_pct, 4), "reason": reason, "source": candidate_source}
 
 
@@ -6260,16 +5826,15 @@ def select_structural_target_zone(
     ref = float(reference)
     candidates = _collect_structural_target_candidates(side, ref, primary_opposing_level, backup_opposing_level, precision_levels)
     tf = str(timeframe_label)
-    target_cfg = SCORING_CONFIG["target_realism"]
-    min_dist = target_cfg["min_dist_pct_by_tf"].get(tf, target_cfg["default_min_dist_pct"])
-    max_dist = target_cfg["max_dist_pct_by_tf"].get(tf, target_cfg["default_max_dist_pct"])
+    min_dist = {"1m": 0.025, "5m": 0.045, "15m": 0.070, "30m": 0.16, "1h": 0.25, "4h": 0.55, "1d": 0.90}.get(tf, 0.20)
+    max_dist = {"1m": 0.45, "5m": 0.75, "15m": 1.15, "30m": 2.20, "1h": 3.50, "4h": 7.00, "1d": 13.0}.get(tf, 2.5)
 
     ranked: List[Tuple[float, Dict[str, object]]] = []
     for item in candidates:
         dist_pct = float(item.get("distance_pct", 999.0))
         if dist_pct < min_dist or dist_pct > max_dist:
             continue
-        rank = (target_cfg["rank_base"] - dist_pct * target_cfg["rank_distance_multiplier"]) + float(item.get("weight", 1.0)) * target_cfg["rank_weight_multiplier"]
+        rank = (100.0 - dist_pct * 12.0) + float(item.get("weight", 1.0)) * 3.0
         ranked.append((rank, item))
 
     if ranked:
@@ -6280,7 +5845,7 @@ def select_structural_target_zone(
 
     if fallback_level is not None:
         score = score_tp_realism(side, ref, fallback_level, tf, vol_profile, "fallback")
-        if float(score.get("score", 0.0)) >= SCORING_CONFIG["target_realism"]["ok_score"]:
+        if float(score.get("score", 0.0)) >= 45.0:
             return {"level": float(fallback_level), "valid": True, "source": "fallback", "score": score, "reason": "Fallback target gebruikt omdat geen betere structuurzone beschikbaar was."}
 
     return {"level": None, "valid": False, "source": "none", "score": {"score": 0.0, "quality": "missing"}, "reason": "Geen realistische eerstvolgende target-zone gevonden."}
@@ -6305,31 +5870,30 @@ def score_sl_breathing_room(
     risk_pct = abs(entry - stop) / entry * 100.0
     tf = str(timeframe_label)
     avg_range_pct = float((vol_profile or {}).get("avg_range_pct", 1.0) or 1.0)
-    min_risk = RISK_CONFIG["min_risk_pct_by_timeframe"].get(tf, RISK_CONFIG["default_min_risk_pct"])
-    max_risk = RISK_CONFIG["max_risk_pct_by_timeframe"].get(tf, RISK_CONFIG["default_max_risk_pct"])
-    min_risk = max(min_risk, avg_range_pct * RISK_CONFIG["min_risk_volatility_factor"])
-    max_risk = max(max_risk, avg_range_pct * RISK_CONFIG["max_risk_volatility_factor"])
+    min_risk = {"1m": 0.05, "5m": 0.09, "15m": 0.14, "30m": 0.20, "1h": 0.30, "4h": 0.50, "1d": 0.80}.get(tf, 0.20)
+    max_risk = {"1m": 0.55, "5m": 0.85, "15m": 1.35, "30m": 1.90, "1h": 2.80, "4h": 5.50, "1d": 9.0}.get(tf, 2.0)
+    min_risk = max(min_risk, avg_range_pct * 0.18)
+    max_risk = max(max_risk, avg_range_pct * 1.20)
 
-    sl_cfg = SCORING_CONFIG["sl_breathing"]
-    score = sl_cfg["base_score"]
+    score = 72.0
     reason = "SL ligt voorbij structurele invalidatie met ademruimte."
     if risk_pct < min_risk:
-        score += sl_cfg["too_tight_penalty"]
+        score -= 35.0
         reason = "SL is waarschijnlijk te strak voor normale candle-ruis."
     elif risk_pct > max_risk:
-        score += sl_cfg["too_wide_penalty"]
+        score -= 28.0
         reason = "SL is erg ruim voor deze timeframe; setup vraagt mogelijk te veel risico."
 
     if invalidation_level is not None:
         inv = float(invalidation_level)
         if str(side).lower() == "long" and stop >= inv:
-            score += sl_cfg["wrong_side_penalty"]
+            score -= 25.0
             reason = "SL ligt niet duidelijk onder structurele invalidatie."
         if str(side).lower() == "short" and stop <= inv:
-            score += sl_cfg["wrong_side_penalty"]
+            score -= 25.0
             reason = "SL ligt niet duidelijk boven structurele invalidatie."
 
-    quality = "good" if score >= sl_cfg["good_score"] else ("ok" if score >= sl_cfg["ok_score"] else "weak")
+    quality = "good" if score >= 70 else ("ok" if score >= 45 else "weak")
     return {"score": round(max(0.0, min(100.0, score)), 1), "quality": quality, "risk_pct": round(risk_pct, 4), "reason": reason}
 
 
@@ -6550,60 +6114,56 @@ def score_trade_candidate(
     market_context: str,
     taker_fee_pct: float,
 ) -> float:
-    candidate_cfg = SCORING_CONFIG["candidate"]
     if metrics is None:
-        return SCORING_CONFIG["bad_metrics_score"]
+        return -10_000.0
 
     conservative_net = calculate_conservative_net_profit(metrics, taker_fee_pct)
     if conservative_net is None:
-        return SCORING_CONFIG["bad_metrics_score"]
+        return -10_000.0
 
     rr = float(metrics.get("rr", 0.0))
     score = 0.0
 
-    score += max(
-        candidate_cfg["conservative_net_min"],
-        min(candidate_cfg["conservative_net_max"], float(conservative_net) * candidate_cfg["conservative_net_multiplier"]),
-    )
-    score += max(candidate_cfg["rr_min"], min(candidate_cfg["rr_max"], rr * candidate_cfg["rr_multiplier"]))
+    score += max(-15.0, min(35.0, float(conservative_net) * 2.0))
+    score += max(-10.0, min(22.0, rr * 8.0))
     score += timing_to_score(timing_label)
 
     if side == "LONG":
         if combined_bias == "long":
-            score += candidate_cfg["bias_aligned_bonus"]
+            score += 16.0
         elif combined_bias == "short":
-            score += candidate_cfg["bias_opposite_penalty"]
+            score -= 18.0
         elif combined_bias == "voorzichtig":
-            score += candidate_cfg["bias_cautious_penalty"]
+            score -= 2.0
 
         if market_context in {"bullish_pullback", "mixed_bullish_near_support"}:
-            score += candidate_cfg["context_pullback_bonus"]
+            score += 16.0
         elif market_context == "aligned_bullish":
-            score += candidate_cfg["context_aligned_bonus"]
+            score += 12.0
         elif market_context == "bearish_pullback":
-            score += candidate_cfg["context_pullback_against_penalty"]
+            score -= 22.0
         elif market_context == "aligned_bearish":
-            score += candidate_cfg["context_aligned_against_penalty"]
+            score -= 28.0
 
     else:
         if combined_bias == "short":
-            score += candidate_cfg["bias_aligned_bonus"]
+            score += 16.0
         elif combined_bias == "long":
-            score += candidate_cfg["bias_opposite_penalty"]
+            score -= 18.0
         elif combined_bias == "voorzichtig":
-            score += candidate_cfg["bias_cautious_penalty"]
+            score -= 2.0
 
         if market_context in {"bearish_pullback", "mixed_bearish_near_resistance"}:
-            score += candidate_cfg["context_pullback_bonus"]
+            score += 16.0
         elif market_context == "aligned_bearish":
             score += 12.0
         elif market_context == "bullish_pullback":
-            score += candidate_cfg["context_pullback_against_penalty"]
+            score -= 22.0
         elif market_context == "aligned_bullish":
-            score += candidate_cfg["context_aligned_against_penalty"]
+            score -= 28.0
 
     if timing_label == "BLOCKED":
-        score += candidate_cfg["blocked_penalty"]
+        score -= 200.0
 
     freshness = metrics.get("freshness", {}) if isinstance(metrics, dict) else {}
     score -= float(freshness.get("penalty_score", 0.0) or 0.0)
@@ -6620,9 +6180,9 @@ def classify_setup_grade(
     short_hard_reason: str = "",
 ) -> str:
     if best_metrics is not None:
-        if score >= SCORING_CONFIG["setup_grade"]["good_score"]:
+        if score >= 55:
             return "GOOD"
-        if score >= SCORING_CONFIG["setup_grade"]["ok_score"]:
+        if score >= 30:
             return "OK"
         return "WEAK"
 
@@ -6665,8 +6225,15 @@ def compute_setup_freshness(
 
     result["progress_pct"] = progress
 
-    freshness_cfg = ANTI_CHASE_CONFIG["freshness_penalty"]
-    recent_window = ANTI_CHASE_CONFIG["freshness_recent_window_by_tf"].get(timeframe_label, 6)
+    recent_window = {
+        "1m": 12,
+        "5m": 8,
+        "15m": 6,
+        "30m": 5,
+        "1h": 4,
+        "4h": 3,
+        "1d": 2,
+    }.get(timeframe_label, 6)
 
     if df is not None and len(df) > 0:
         recent = df.tail(min(len(df), recent_window))
@@ -6680,24 +6247,28 @@ def compute_setup_freshness(
     if recent_extreme_hit:
         result["is_stale"] = True
         result["severity"] = "hard_stale"
-        result["penalty_score"] = freshness_cfg["target_recently_hit"]
+        result["penalty_score"] = 120.0
         result["reason"] = "winstdoel recent al geraakt"
-    elif progress >= freshness_cfg["hard_stale_progress_pct"]:
+    elif progress >= 75:
         result["is_stale"] = True
         result["severity"] = "hard_stale"
-        result["penalty_score"] = freshness_cfg["hard_stale_penalty"]
+        result["penalty_score"] = 90.0
         result["reason"] = "move vrijwel volledig geweest"
-    elif progress >= freshness_cfg["stale_progress_pct"]:
+    elif progress >= 60:
         result["is_stale"] = True
         result["severity"] = "stale"
-        result["penalty_score"] = freshness_cfg["stale_penalty"]
+        result["penalty_score"] = 55.0
         result["reason"] = "move al grotendeels geweest"
-    elif progress >= freshness_cfg["aging_progress_pct"]:
+    elif progress >= 40:
         result["severity"] = "aging"
-        result["penalty_score"] = freshness_cfg["aging_penalty"]
+        result["penalty_score"] = 20.0
         result["reason"] = "move is al deels onderweg"
 
     return result
+
+
+
+
 
 
 def _safe_float(value: Optional[object], default: float = 0.0) -> float:
@@ -6709,6 +6280,8 @@ def _safe_float(value: Optional[object], default: float = 0.0) -> float:
         return float(default)
 
 
+
+
 # =========================================================
 # Phase 5 - Two setup families only
 # =========================================================
@@ -6717,28 +6290,27 @@ def _safe_float(value: Optional[object], default: float = 0.0) -> float:
 def score_confirmation_confluence(confirmation: Optional[Dict[str, object]]) -> float:
     if not isinstance(confirmation, dict):
         return 0.0
-    confirmation_cfg = SCORING_CONFIG["confirmation"]
     score = 0.0
     if bool(confirmation.get("touched_zone", False)):
-        score += confirmation_cfg["touched_zone_bonus"]
+        score += 18.0
     if bool(confirmation.get("bullish_reject", False)) or bool(confirmation.get("bearish_reject", False)):
-        score += confirmation_cfg["rejection_bonus"]
+        score += 26.0
     if bool(confirmation.get("close_back_in_favor", False)):
-        score += confirmation_cfg["close_back_in_favor_bonus"]
+        score += 22.0
     if bool(confirmation.get("reclaim_trigger_hit", False)):
-        score += confirmation_cfg["reclaim_trigger_bonus"]
+        score += 24.0
     if bool(confirmation.get("volume_support", False)):
-        score += confirmation_cfg["volume_support_bonus"]
+        score += 10.0
     if bool(confirmation.get("confirmed", False)):
-        score = max(score, confirmation_cfg["confirmed_min_score"])
-    return round(min(score, confirmation_cfg["max_score"]), 1)
+        score = max(score, 70.0)
+    return round(min(score, 100.0), 1)
 
 
 def confirmation_score_label(score: float) -> str:
     score = float(score or 0.0)
-    if score >= SCORING_CONFIG["confirmation"]["strong_label_score"]:
+    if score >= 70:
         return "sterk"
-    if score >= SCORING_CONFIG["confirmation"]["ok_label_score"]:
+    if score >= 40:
         return "oké"
     if score > 0:
         return "zwak"
@@ -6759,11 +6331,11 @@ def _zone_contains_price_or_candle(zone: Optional[Dict[str, float]], price_low: 
 def classify_volume_status(volume_ratio: float, last3_ratio: Optional[float] = None) -> str:
     ratio = float(volume_ratio or 0.0)
     last3 = float(last3_ratio) if last3_ratio is not None else ratio
-    if ratio >= VOLUME_CONFIG["spike_ratio"]:
+    if ratio >= 1.80:
         return "spike"
-    if ratio >= VOLUME_CONFIG["high_ratio"]:
+    if ratio >= 1.20:
         return "hoog"
-    if ratio <= VOLUME_CONFIG["low_ratio"] or last3 <= VOLUME_CONFIG["drying_up_last_n_ratio"]:
+    if ratio <= 0.70 or last3 <= 0.75:
         return "laag / droogt op"
     return "normaal"
 
@@ -6804,17 +6376,17 @@ def build_volume_context_engine(
         return result
 
     try:
-        recent = df.tail(min(len(df), VOLUME_CONFIG["lookback_recent_candles"])).copy()
+        recent = df.tail(min(len(df), 30)).copy()
         latest = recent.iloc[-1]
         latest_volume = float(latest["volume"])
-        baseline = recent.iloc[:-1]["volume"].tail(min(len(recent) - 1, VOLUME_CONFIG["baseline_candles"]))
+        baseline = recent.iloc[:-1]["volume"].tail(min(len(recent) - 1, 20))
         avg_volume = float(baseline.mean()) if len(baseline) else 0.0
         if avg_volume <= 0:
             return result
 
         volume_ratio = latest_volume / avg_volume
-        last3_avg = float(recent["volume"].tail(min(len(recent), VOLUME_CONFIG["last_n_candles"])).mean())
-        prior_avg = float(recent["volume"].iloc[:-VOLUME_CONFIG["last_n_candles"]].tail(min(max(len(recent) - VOLUME_CONFIG["last_n_candles"], 1), VOLUME_CONFIG["prior_avg_candles"])).mean()) if len(recent) > VOLUME_CONFIG["last_n_candles"] + 1 else avg_volume
+        last3_avg = float(recent["volume"].tail(min(len(recent), 3)).mean())
+        prior_avg = float(recent["volume"].iloc[:-3].tail(min(max(len(recent) - 3, 1), 12)).mean()) if len(recent) > 4 else avg_volume
         last3_ratio = last3_avg / prior_avg if prior_avg > 0 else volume_ratio
 
         latest_open = float(latest["open"])
@@ -6824,10 +6396,10 @@ def build_volume_context_engine(
         cp = float(current_price) if current_price is not None else latest_close
 
         status = classify_volume_status(volume_ratio, last3_ratio)
-        high_volume = volume_ratio >= VOLUME_CONFIG["high_ratio"]
-        spike_volume = volume_ratio >= VOLUME_CONFIG["spike_ratio"]
-        low_volume = volume_ratio <= VOLUME_CONFIG["low_ratio"]
-        drying_up = bool(last3_ratio <= VOLUME_CONFIG["drying_up_last_n_ratio"] or low_volume)
+        high_volume = volume_ratio >= 1.20
+        spike_volume = volume_ratio >= 1.80
+        low_volume = volume_ratio <= 0.70
+        drying_up = bool(last3_ratio <= 0.75 or low_volume)
 
         support_touch = _zone_contains_price_or_candle(support_zone, latest_low, latest_high)
         resistance_touch = _zone_contains_price_or_candle(resistance_zone, latest_low, latest_high)
@@ -6844,57 +6416,57 @@ def build_volume_context_engine(
         breakout_down = bool(support_z and latest_close < float(support_z["low"]))
         breakout_up_with_volume = breakout_up and high_volume
         breakout_down_with_volume = breakout_down and high_volume
-        weak_breakout_risk = bool((breakout_up or breakout_down) and volume_ratio < VOLUME_CONFIG["weak_breakout_ratio"])
+        weak_breakout_risk = bool((breakout_up or breakout_down) and volume_ratio < 0.85)
 
         long_score = 0.0
         short_score = 0.0
         reasons: List[str] = []
 
         if bullish_rejection and high_volume:
-            long_score += VOLUME_CONFIG["support_rejection_bonus"]
+            long_score += 28.0
             reasons.append("kopers reageren met volume op support")
         elif support_touch and low_volume:
-            long_score += VOLUME_CONFIG["support_touch_low_volume_penalty"]
+            long_score -= 8.0
             reasons.append("support-touch met laag volume; bounce is minder overtuigend")
         elif support_touch:
-            long_score += VOLUME_CONFIG["support_touch_bonus"]
+            long_score += 8.0
             reasons.append("prijs reageert op support")
 
         if bearish_rejection and high_volume:
-            short_score += VOLUME_CONFIG["support_rejection_bonus"]
+            short_score += 28.0
             reasons.append("verkopers reageren met volume op resistance")
         elif resistance_touch and low_volume:
-            short_score += VOLUME_CONFIG["support_touch_low_volume_penalty"]
+            short_score -= 8.0
             reasons.append("resistance-touch met laag volume; rejection is minder overtuigend")
         elif resistance_touch:
-            short_score += VOLUME_CONFIG["support_touch_bonus"]
+            short_score += 8.0
             reasons.append("prijs reageert op resistance")
 
         if breakout_up_with_volume:
-            long_score += VOLUME_CONFIG["breakout_volume_bonus"]
-            short_score += VOLUME_CONFIG["breakout_against_penalty"]
+            long_score += 18.0
+            short_score -= 8.0
             reasons.append("breakout omhoog wordt gedragen door volume")
         if breakout_down_with_volume:
-            short_score += VOLUME_CONFIG["breakout_volume_bonus"]
-            long_score += VOLUME_CONFIG["breakout_against_penalty"]
+            short_score += 18.0
+            long_score -= 8.0
             reasons.append("breakdown omlaag wordt gedragen door volume")
         if weak_breakout_risk:
-            long_score += VOLUME_CONFIG["weak_breakout_penalty"] if breakout_up else 0.0
-            short_score += VOLUME_CONFIG["weak_breakout_penalty"] if breakout_down else 0.0
+            long_score -= 10.0 if breakout_up else 0.0
+            short_score -= 10.0 if breakout_down else 0.0
             reasons.append("uitbraak zonder volume; fakeout-risico")
         if spike_volume:
             if bullish_body:
-                long_score += VOLUME_CONFIG["spike_body_bonus"]
+                long_score += 8.0
             if bearish_body:
-                short_score += VOLUME_CONFIG["spike_body_bonus"]
+                short_score += 8.0
         if drying_up and not support_touch and not resistance_touch:
-            long_score += VOLUME_CONFIG["drying_up_penalty"]
-            short_score += VOLUME_CONFIG["drying_up_penalty"]
+            long_score -= 4.0
+            short_score -= 4.0
 
         supports = "neutraal"
-        if long_score >= short_score + VOLUME_CONFIG["direction_score_margin"]:
+        if long_score >= short_score + 8:
             supports = "LONG"
-        elif short_score >= long_score + VOLUME_CONFIG["direction_score_margin"]:
+        elif short_score >= long_score + 8:
             supports = "SHORT"
         elif drying_up:
             supports = "wachten"
@@ -6902,9 +6474,9 @@ def build_volume_context_engine(
         management_hint = "Volume geeft geen extra management-actie."
         if target_z and cp is not None:
             near_target = distance_to_zone_pct(cp, target_z)
-            if near_target is not None and near_target <= VOLUME_CONFIG["near_target_pct"] and drying_up:
+            if near_target is not None and near_target <= 0.20 and drying_up:
                 management_hint = "Prijs zit dicht bij target en volume droogt op: denk aan gedeeltelijke TP / niet te hebberig."
-            elif near_target is not None and near_target <= VOLUME_CONFIG["near_target_pct"] and high_volume:
+            elif near_target is not None and near_target <= 0.20 and high_volume:
                 management_hint = "Prijs nadert target met sterk volume: TP blijft logisch, maar momentum is nog aanwezig."
         if active_side and str(active_side).upper() == "LONG" and bearish_body and spike_volume:
             management_hint = "LONG actief? Tegenbeweging met volume-spike: oppassen / risico verlagen."
@@ -7150,23 +6722,22 @@ def _build_mode_candidate(
         taker_fee_pct=taker_fee_pct,
     )
 
-    ranking_cfg = SCORING_CONFIG["ranking"]
     if mode == "plan":
-        score += ranking_cfg["plan_mode_bonus"]
+        score += 4.0
         if timing_label == "READY":
-            score += ranking_cfg["plan_ready_bonus"]
+            score += 4.0
         if timing_label == "NEAR":
-            score += ranking_cfg["plan_near_bonus"]
+            score += 2.0
     else:
-        score += ranking_cfg["early_entry_bonus"] if variant == "early_price_action" else ranking_cfg["retest_entry_bonus"]
+        score += 8.0 if variant == "early_price_action" else 6.0
 
     location_quality = str((location_info or {}).get("quality", "UNKNOWN"))
     if location_quality == "B_ENTRY":
-        score += ranking_cfg["location_b_entry_penalty"]
+        score -= 3.0
     elif location_quality == "LATE":
-        score += ranking_cfg["location_late_penalty"]
+        score -= 8.0
     elif location_quality == "SKIP":
-        score += ranking_cfg["location_skip_penalty"]
+        score -= 100.0
 
     plan_status = str(plan.get("status", "WAIT")) if isinstance(plan, dict) else "WAIT"
     plan_reason = str(plan.get("reason", "")) if isinstance(plan, dict) else ""
@@ -7199,20 +6770,20 @@ def _build_mode_candidate(
     reason = plan_reason or str(trade_status.get("reason", ""))
 
     if status in {"BLOCKED", "HANDS_OFF"}:
-        score += ranking_cfg["blocked_penalty"]
+        score -= 200.0
         reason = context_reason or reason
     elif status == "MISSED":
-        score += ranking_cfg["missed_penalty"]
+        score -= 120.0
     elif status == "READY":
-        score += ranking_cfg["ready_bonus"]
+        score += 10.0
     elif status == "PLAN":
-        score += ranking_cfg["plan_bonus"]
+        score += 4.0
 
     # V3.6: prijsactie-confirmatie is extra confluence, nooit een harde gate.
     if variant == "retest_breakout":
-        score += min(float(confirmation_score) * ranking_cfg["retest_confirmation_multiplier"], ranking_cfg["retest_confirmation_cap"])
+        score += min(float(confirmation_score) * 0.22, 22.0)
     elif confirmation_score > 0:
-        score += min(float(confirmation_score) * ranking_cfg["confirmation_multiplier"], ranking_cfg["confirmation_cap"])
+        score += min(float(confirmation_score) * 0.10, 10.0)
 
     conservative_net = calculate_conservative_net_profit(metrics, taker_fee_pct)
 
@@ -7389,7 +6960,15 @@ def _candidate_distance_to_entry_pct(candidate: Optional[Dict[str, object]]) -> 
 
 def _status_rank(status: Optional[str]) -> int:
     status = normalize_trader_status(status) if "normalize_trader_status" in globals() else str(status or "WAIT")
-    return PLAN_CONFIG["plan_status_rank"].get(str(status), 1)
+    return {
+        "READY": 5,
+        "PLAN": 4,
+        "WAIT": 2,
+        "SCALE_OUT": 4,
+        "MISSED": 0,
+        "HANDS_OFF": -2,
+        "BLOCKED": -3,
+    }.get(str(status), 1)
 
 
 def rank_plan_candidates(candidates: List[Dict[str, object]]) -> List[Dict[str, object]]:
@@ -7403,26 +6982,14 @@ def rank_plan_candidates(candidates: List[Dict[str, object]]) -> List[Dict[str, 
         allowed = bool(item.get("allowed_by_context", False))
         loc = str(item.get("location_quality", "UNKNOWN"))
         loc_bonus = {"A_ENTRY": 18.0, "B_ENTRY": 10.0, "UNKNOWN": 2.0, "LATE": -14.0, "SKIP": -80.0}.get(loc, 0.0)
-        status_bonus = {
-            "READY": 42.0,
-            "NEAR": 34.0,
-            "UPCOMING": 28.0,
-            "PLAN": 22.0,
-            "WAIT": 4.0,
-            "MISSED": -80.0,
-            "INVALID": -90.0,
-            "NO_PLAN": -100.0,
-            "HANDS_OFF": -120.0,
-            "BLOCKED": -120.0,
-        }.get(status, 0.0)
+        status_bonus = {"READY": 16.0, "PLAN": 22.0, "WAIT": 4.0, "MISSED": -80.0, "HANDS_OFF": -120.0, "BLOCKED": -120.0}.get(status, 0.0)
         allowed_bonus = 30.0 if allowed else -120.0
         distance_penalty = min(_candidate_distance_to_entry_pct(item) * 3.0, 18.0)
-        # Fase 3: plan-rank is bewust leidend; confirmation komt later als bonus.
         planner_score = _candidate_safe_score(item) + allowed_bonus + loc_bonus + status_bonus - distance_penalty
         item["planner_rank_score"] = round(float(planner_score), 2)
         item["rank_bucket"] = "best_plan"
         ranked.append(item)
-    return sorted(ranked, key=lambda x: (x.get("planner_rank_score", SCORING_CONFIG["ranking"]["sort_missing_score"]), x.get("score", SCORING_CONFIG["ranking"]["sort_missing_score"])), reverse=True)
+    return sorted(ranked, key=lambda x: (x.get("planner_rank_score", -9999), x.get("score", -9999)), reverse=True)
 
 
 def rank_entry_candidates(candidates: List[Dict[str, object]]) -> List[Dict[str, object]]:
@@ -7435,26 +7002,13 @@ def rank_entry_candidates(candidates: List[Dict[str, object]]) -> List[Dict[str,
         status = normalize_trader_status(item.get("status")) if "normalize_trader_status" in globals() else str(item.get("status", "WAIT"))
         allowed = bool(item.get("allowed_by_context", False))
         confirmed_bonus = 10.0 if bool((item.get("setup_detection") or {}).get("confirmed", False)) else 0.0
-        status_bonus = {
-            "READY": 42.0,
-            "NEAR": 8.0,
-            "UPCOMING": 2.0,
-            "SCALE_OUT": 18.0,
-            "PLAN": 4.0,
-            "WAIT": -15.0,
-            "MISSED": -120.0,
-            "INVALID": -140.0,
-            "NO_PLAN": -150.0,
-            "HANDS_OFF": -150.0,
-            "BLOCKED": -150.0,
-        }.get(status, -10.0)
+        status_bonus = {"READY": 60.0, "SCALE_OUT": 18.0, "PLAN": 4.0, "WAIT": -15.0, "MISSED": -120.0, "HANDS_OFF": -150.0, "BLOCKED": -150.0}.get(status, -10.0)
         allowed_bonus = 25.0 if allowed else -150.0
-        # Confirmation blijft een bonus binnen entry-mode, maar entry-mode bepaalt niet meer of een plan bestaat.
         entry_score = _candidate_safe_score(item) + status_bonus + allowed_bonus + confirmed_bonus
         item["entry_rank_score"] = round(float(entry_score), 2)
         item["rank_bucket"] = "best_entry_now"
         ranked.append(item)
-    return sorted(ranked, key=lambda x: (x.get("entry_rank_score", SCORING_CONFIG["ranking"]["sort_missing_score"]), x.get("score", SCORING_CONFIG["ranking"]["sort_missing_score"])), reverse=True)
+    return sorted(ranked, key=lambda x: (x.get("entry_rank_score", -9999), x.get("score", -9999)), reverse=True)
 
 
 def rank_upcoming_zone_candidates(candidates: List[Dict[str, object]]) -> List[Dict[str, object]]:
@@ -7466,18 +7020,18 @@ def rank_upcoming_zone_candidates(candidates: List[Dict[str, object]]) -> List[D
         item = dict(c)
         status = normalize_trader_status(item.get("status")) if "normalize_trader_status" in globals() else str(item.get("status", "WAIT"))
         allowed = bool(item.get("allowed_by_context", False))
-        if status in {"MISSED", "INVALID", "NO_PLAN", "HANDS_OFF", "BLOCKED"}:
+        if status in {"MISSED", "HANDS_OFF", "BLOCKED"}:
             zone_score = -999.0
         else:
             distance = _candidate_distance_to_entry_pct(item)
             distance_bonus = max(0.0, 24.0 - min(distance, 8.0) * 3.0)
-            status_bonus = {"UPCOMING": 34.0, "NEAR": 26.0, "PLAN": 30.0, "WAIT": 18.0, "READY": 8.0, "SCALE_OUT": 0.0}.get(status, 0.0)
+            status_bonus = {"PLAN": 30.0, "WAIT": 18.0, "READY": 8.0, "SCALE_OUT": 0.0}.get(status, 0.0)
             allowed_bonus = 25.0 if allowed else -80.0
             zone_score = (_candidate_safe_score(item) * 0.65) + status_bonus + allowed_bonus + distance_bonus
         item["upcoming_zone_rank_score"] = round(float(zone_score), 2)
         item["rank_bucket"] = "best_upcoming_zone"
         ranked.append(item)
-    return sorted(ranked, key=lambda x: (x.get("upcoming_zone_rank_score", SCORING_CONFIG["ranking"]["sort_missing_score"]), x.get("score", SCORING_CONFIG["ranking"]["sort_missing_score"])), reverse=True)
+    return sorted(ranked, key=lambda x: (x.get("upcoming_zone_rank_score", -9999), x.get("score", -9999)), reverse=True)
 
 
 def build_planner_ranking_summary(
@@ -7502,44 +7056,34 @@ def classify_trade_opportunity(
     context_engine: Dict[str, object],
     context_preferred_side: Optional[str],
 ) -> Dict[str, object]:
-    """
-    Fase 3: plan-candidate is leidend.
-    Entry-candidates blijven beschikbaar, maar alleen als confirmation/bonus naast het plan.
-    """
     planner_ranking = build_planner_ranking_summary(plan_candidates, entry_candidates)
     best_plan = planner_ranking.get("best_plan_candidate")
     best_entry = planner_ranking.get("best_entry_now_candidate")
     best_upcoming = planner_ranking.get("best_upcoming_zone_candidate")
     market_state = str(context_engine.get("market_state", "range"))
 
-    best_plan_status = normalize_trader_status(best_plan.get("status")) if isinstance(best_plan, dict) else "NO_PLAN"
     best_entry_status = normalize_trader_status(best_entry.get("status")) if isinstance(best_entry, dict) else "WAIT"
+    best_plan_status = normalize_trader_status(best_plan.get("status")) if isinstance(best_plan, dict) else "WAIT"
 
-    if isinstance(best_plan, dict) and bool(best_plan.get("allowed_by_context", False)) and best_plan_status in {"READY", "NEAR", "UPCOMING", "PLAN", "WAIT"}:
-        side = best_plan.get("side", "-")
-        if best_plan_status == "READY" and isinstance(best_entry, dict) and best_entry_status == "READY" and best_entry.get("side") == side:
-            headline = f"Plan READY + confirmation: {side}"
-            status = "READY"
-        elif best_plan_status == "READY":
-            headline = f"Plan READY: {side}"
-            status = "READY"
-        elif best_plan_status == "NEAR":
-            headline = f"Plan bijna actief: {side}"
-            status = "NEAR"
-        elif best_plan_status == "UPCOMING":
-            headline = f"Plan klaarzetten: {side}"
-            status = "UPCOMING"
-        else:
-            headline = f"Plan klaarzetten: {side}"
-            status = "PLAN"
-        primary_side = side
-    elif isinstance(best_plan, dict) and best_plan_status == "MISSED":
-        headline = f"Plan gemist: {best_plan.get('side', '-')}"
+    if best_entry is not None and best_entry_status == "HANDS_OFF":
+        headline = "Hands off"
+        status = "HANDS_OFF"
+        primary_side = None
+    elif best_entry is not None and best_entry_status == "MISSED":
+        headline = "Setup gemist"
         status = "MISSED"
-        primary_side = best_plan.get("side")
+        primary_side = None
+    elif best_entry is not None and best_entry_status == "READY" and bool(best_entry.get("allowed_by_context", False)):
+        headline = f"Entry nu: {best_entry['side']}"
+        status = "READY"
+        primary_side = best_entry["side"]
+    elif best_plan is not None and bool(best_plan.get("allowed_by_context", False)) and best_plan_status in {"PLAN", "READY", "WAIT"}:
+        headline = f"Plan klaarzetten: {best_plan['side']}"
+        status = "PLAN"
+        primary_side = best_plan["side"]
     elif best_upcoming is not None and bool(best_upcoming.get("allowed_by_context", False)):
         headline = f"Upcoming zone: {best_upcoming.get('side', '-')}"
-        status = "UPCOMING"
+        status = "UPCOMING_ZONE"
         primary_side = best_upcoming.get("side")
     elif market_state == "hands_off":
         headline = "Hands off"
@@ -7547,11 +7091,11 @@ def classify_trade_opportunity(
         primary_side = None
     elif market_state == "compressie":
         headline = "Wachten op breakout / retest"
-        status = "WAIT"
+        status = "WAIT_BREAKOUT"
         primary_side = None
     elif market_state == "choppy":
         headline = "Choppy / overslaan"
-        status = "HANDS_OFF"
+        status = "SKIP"
         primary_side = None
     else:
         headline = "Wachten"
@@ -7572,18 +7116,10 @@ def classify_trade_opportunity(
         "has_plan_candidate": best_plan is not None,
         "has_entry_candidate": best_entry is not None,
         "has_upcoming_zone_candidate": best_upcoming is not None,
-        "plan_first": True,
-        "confirmation_is_bonus": True,
     }
 
 
 def render_plan_vs_entry_sections(selected_result: Dict[str, object]) -> None:
-    primary_plan = selected_result.get("primary_trade_plan")
-    if isinstance(primary_plan, dict):
-        st.markdown("**🧭 Primaire Plan-first Engine V3**")
-        render_primary_trade_plan_card(primary_plan)
-        st.divider()
-
     trade_opportunity = selected_result.get("trade_opportunity") or {}
     best_plan = trade_opportunity.get("best_plan_candidate")
     best_entry = trade_opportunity.get("best_entry_candidate")
@@ -7660,7 +7196,7 @@ def render_plan_vs_entry_sections(selected_result: Dict[str, object]) -> None:
 # =========================================================
 # Phase 6 - Lower Timeframe Precision Engine
 # =========================================================
-LOWER_TF_PRECISION_TIMEFRAMES = LOWER_TF_CONFIG["active_timeframes"]
+LOWER_TF_PRECISION_TIMEFRAMES = {"1m", "5m", "15m"}
 
 
 def is_lower_tf_precision_timeframe(timeframe_label: str) -> bool:
@@ -7711,9 +7247,9 @@ def _select_nearest_level_in_pct_window(
 def detect_micro_structure(
     df: Optional[pd.DataFrame],
     current_price: Optional[float] = None,
-    lookback: int = LOWER_TF_CONFIG["default_micro_lookback"],
-    swing_window: int = LOWER_TF_CONFIG["micro_swing_window"],
-    merge_threshold_pct: float = LOWER_TF_CONFIG["micro_merge_threshold_default_pct"],
+    lookback: int = 50,
+    swing_window: int = 2,
+    merge_threshold_pct: float = 0.10,
 ) -> Dict[str, object]:
     """
     Lower TF price-action structuur.
@@ -7814,37 +7350,37 @@ def build_lower_tf_precision_levels(
     if not active or current_price is None or df is None or len(df) < 15:
         return result
 
-    lookback = LOWER_TF_CONFIG["micro_lookback"].get(str(timeframe_label), LOWER_TF_CONFIG["default_micro_lookback"])
+    lookback = {"1m": 100, "5m": 90, "15m": 70}.get(str(timeframe_label), 60)
     zone_width = get_coin_zone_width_pct(coin_symbol, vol_profile, zone_kind="entry")
     # Dunnere merge bij rustige coins: voorkomt mega-zones die niet gevuld worden.
-    merge_threshold_pct = max(LOWER_TF_CONFIG["micro_merge_min_pct"], min(LOWER_TF_CONFIG["micro_merge_max_pct"], zone_width * LOWER_TF_CONFIG["micro_merge_factor"]))
+    merge_threshold_pct = max(0.025, min(0.11, zone_width * 0.45))
     micro = detect_micro_structure(
         df=df,
         current_price=current_price,
         lookback=lookback,
-        swing_window=LOWER_TF_CONFIG["micro_swing_window"],
+        swing_window=2,
         merge_threshold_pct=merge_threshold_pct,
     )
 
     cp = float(current_price)
-    max_dist = LOWER_TF_CONFIG["max_entry_distance_pct"].get(str(timeframe_label), LOWER_TF_CONFIG["default_max_entry_distance_pct"])
-    min_dist = LOWER_TF_CONFIG["min_entry_distance_major_pct"] if coin_symbol in {"BTC", "ETH"} else LOWER_TF_CONFIG["min_entry_distance_alt_pct"]
+    max_dist = {"1m": 0.38, "5m": 0.62, "15m": 0.95}.get(str(timeframe_label), 0.70)
+    min_dist = 0.006 if coin_symbol in {"BTC", "ETH"} else 0.010
 
     trade_support = _select_nearest_level_in_pct_window(micro.get("trade_supports", []), cp, "below", min_dist, max_dist)
     trade_resistance = _select_nearest_level_in_pct_window(micro.get("trade_resistances", []), cp, "above", min_dist, max_dist)
-    hard_support = _select_nearest_level_in_pct_window(micro.get("hard_supports", []), cp, "below", min_dist, max_dist * LOWER_TF_CONFIG["hard_level_distance_multiplier"])
-    hard_resistance = _select_nearest_level_in_pct_window(micro.get("hard_resistances", []), cp, "above", min_dist, max_dist * LOWER_TF_CONFIG["hard_level_distance_multiplier"])
+    hard_support = _select_nearest_level_in_pct_window(micro.get("hard_supports", []), cp, "below", min_dist, max_dist * 1.35)
+    hard_resistance = _select_nearest_level_in_pct_window(micro.get("hard_resistances", []), cp, "above", min_dist, max_dist * 1.35)
 
     # Fallback: als swings ontbreken, gebruik recente range-extremen, maar alleen als die niet absurd ver liggen.
     recent_low = micro.get("recent_low")
     recent_high = micro.get("recent_high")
     if trade_support is None and recent_low is not None and recent_low < cp:
         dist = abs(cp - float(recent_low)) / cp * 100.0
-        if dist <= max_dist * LOWER_TF_CONFIG["recent_extreme_fallback_multiplier"]:
+        if dist <= max_dist * 1.25:
             trade_support = float(recent_low)
     if trade_resistance is None and recent_high is not None and recent_high > cp:
         dist = abs(float(recent_high) - cp) / cp * 100.0
-        if dist <= max_dist * LOWER_TF_CONFIG["recent_extreme_fallback_multiplier"]:
+        if dist <= max_dist * 1.25:
             trade_resistance = float(recent_high)
 
     if hard_support is None:
@@ -7852,7 +7388,7 @@ def build_lower_tf_precision_levels(
     if hard_resistance is None:
         hard_resistance = trade_resistance
 
-    atr_like = _recent_atr_like_value(df, lookback=LOWER_TF_CONFIG["atr_lookback"])
+    atr_like = _recent_atr_like_value(df, lookback=20)
     result.update({
         "trade_support": trade_support,
         "trade_resistance": trade_resistance,
@@ -7879,8 +7415,8 @@ def select_intraday_target(
 
     cp = float(reference_price)
     micro = precision_levels.get("micro_structure", {}) or {}
-    min_dist = LOWER_TF_CONFIG["target_min_distance_pct"].get(str(timeframe_label), LOWER_TF_CONFIG["target_default_min_distance_pct"])
-    max_dist = LOWER_TF_CONFIG["target_max_distance_pct"].get(str(timeframe_label), LOWER_TF_CONFIG["target_default_max_distance_pct"])
+    min_dist = {"1m": 0.025, "5m": 0.045, "15m": 0.070}.get(str(timeframe_label), 0.06)
+    max_dist = {"1m": 0.42, "5m": 0.70, "15m": 1.05}.get(str(timeframe_label), 0.80)
 
     if side.lower() == "long":
         candidates = list(micro.get("trade_resistances", [])) + list(micro.get("hard_resistances", []))
@@ -7896,7 +7432,7 @@ def select_intraday_target(
     if fallback_level is not None:
         fallback = float(fallback_level)
         dist = abs(fallback - cp) / max(abs(cp), 1e-9) * 100.0
-        if dist <= max_dist * LOWER_TF_CONFIG["target_fallback_multiplier"]:
+        if dist <= max_dist * 1.75:
             return fallback
     return None
 
@@ -7916,8 +7452,8 @@ def select_intraday_stop(
 
     entry = float(entry_price)
     atr_like = precision_levels.get("atr_like")
-    atr_buffer = float(atr_like) * LOWER_TF_CONFIG["atr_buffer_multiplier"].get(str(timeframe_label), LOWER_TF_CONFIG["default_atr_buffer_multiplier"]) if atr_like else entry * LOWER_TF_CONFIG["fallback_atr_buffer_pct"]
-    min_buffer_pct = LOWER_TF_CONFIG["min_stop_buffer_pct"].get(str(timeframe_label), LOWER_TF_CONFIG["default_min_stop_buffer_pct"])
+    atr_buffer = float(atr_like) * {"1m": 0.80, "5m": 0.95, "15m": 1.15}.get(str(timeframe_label), 1.0) if atr_like else entry * 0.0012
+    min_buffer_pct = {"1m": 0.06, "5m": 0.10, "15m": 0.16}.get(str(timeframe_label), 0.10)
     min_buffer = entry * (min_buffer_pct / 100.0)
     buffer_value = max(atr_buffer, min_buffer)
 
@@ -7925,12 +7461,12 @@ def select_intraday_stop(
         base = precision_levels.get("hard_support") or precision_levels.get("trade_support")
         if base is None:
             return fallback_stop
-        return min(float(base) - buffer_value * LOWER_TF_CONFIG["base_buffer_fraction"], entry - buffer_value)
+        return min(float(base) - buffer_value * 0.25, entry - buffer_value)
 
     base = precision_levels.get("hard_resistance") or precision_levels.get("trade_resistance")
     if base is None:
         return fallback_stop
-    return max(float(base) + buffer_value * LOWER_TF_CONFIG["base_buffer_fraction"], entry + buffer_value)
+    return max(float(base) + buffer_value * 0.25, entry + buffer_value)
 
 
 def build_scalp_trade_plan(
@@ -8870,37 +8406,10 @@ def analyze_coin_setup(
         context_preferred_side=context_preferred_side,
     )
 
-    primary_trade_plan = build_primary_trade_plan(
-        plan_candidates=plan_mode_candidates,
-        entry_candidates=entry_mode_candidates,
-        trade_opportunity=trade_opportunity,
-        current_price=current_price,
-        coin_symbol=coin,
-        timeframe_label=timeframe_label,
-        speelveld=speelveld,
-        context_engine=context_engine,
-        context_preferred_side=context_preferred_side,
-    )
-    trade_opportunity["primary_trade_plan"] = primary_trade_plan
-
     best_entry_candidate = trade_opportunity.get("best_entry_candidate")
     best_plan_candidate = trade_opportunity.get("best_plan_candidate")
 
-    # Fase 3: het primaire plan is leidend; een READY entry is alleen confirmation/bonus.
-    primary_side = primary_trade_plan.get("side") if isinstance(primary_trade_plan, dict) and primary_trade_plan.get("side") in {"LONG", "SHORT"} else trade_opportunity.get("primary_side")
-    primary_plan_status = str(primary_trade_plan.get("status")) if isinstance(primary_trade_plan, dict) else "NO_PLAN"
-    if primary_side in {"LONG", "SHORT"}:
-        best_side = primary_side
-        plan_metrics = primary_trade_plan.get("metrics") if isinstance(primary_trade_plan, dict) else None
-        if isinstance(plan_metrics, dict) and primary_plan_status in {"READY", "NEAR", "UPCOMING"}:
-            best_metrics = plan_metrics
-            best_targets = plan_metrics.get("target")
-        else:
-            best_metrics = None
-            best_targets = None
-        chosen_entry_variant = "plan_first"
-        best_reason = str((primary_trade_plan or {}).get("plan_reason") or "Plan-first heeft een vooraf tradeplan klaarstaan.")
-    elif best_entry_candidate is not None and str(best_entry_candidate.get("status")) == "READY":
+    if best_entry_candidate is not None and str(best_entry_candidate.get("status")) == "READY":
         best_side = best_entry_candidate.get("side")
         best_metrics = best_entry_candidate.get("metrics")
         best_targets = best_entry_candidate.get("target")
@@ -8932,16 +8441,14 @@ def analyze_coin_setup(
     score = calculate_setup_score(best_metrics, best_side, combined_bias, taker_fee_pct)
 
     context_state = str(context_engine.get("market_state", ""))
-    if isinstance(primary_trade_plan, dict) and primary_trade_plan.get("status") in {"READY", "NEAR", "UPCOMING", "MISSED", "INVALID", "NO_PLAN"}:
-        status = f"{primary_trade_plan.get('status')} • {primary_trade_plan.get('side', 'WAIT')}"
-    elif best_metrics is not None:
+    if best_metrics is not None:
         longish = best_side == "LONG"
         timing_label = setup_timing["long_timing"] if longish else setup_timing["short_timing"]
         status = f"Kansrijk • {timing_label}"
     elif best_plan_candidate is not None and normalize_trader_status(best_plan_candidate.get("status")) == "READY":
         action = (best_plan_candidate.get("pre_trade_plan") or {}).get("action") or "Entry nu"
         status = f"{action} • {best_plan_candidate.get('side', '-')}"
-    elif best_plan_candidate is not None and normalize_trader_status(best_plan_candidate.get("status")) in {"PLAN", "NEAR", "UPCOMING"}:
+    elif best_plan_candidate is not None and normalize_trader_status(best_plan_candidate.get("status")) == "PLAN":
         status = f"Plan actief • {best_plan_candidate.get('side', '-')}"
     elif context_state == "hands_off":
         status = "Hands off"
@@ -9095,9 +8602,6 @@ def analyze_coin_setup(
         "plan_mode_candidates": plan_mode_candidates,
         "entry_mode_candidates": entry_mode_candidates,
         "trade_opportunity": trade_opportunity,
-        "primary_trade_plan": primary_trade_plan,
-        "plan_first_engine_active": True,
-        "confirmation_is_bonus": True,
         "best_side": best_side,
         "best_metrics": best_metrics,
         "best_targets": best_targets,
@@ -9115,7 +8619,7 @@ def analyze_coin_setup(
         "long_chase_risk": long_chase_risk,
         "short_chase_risk": short_chase_risk,
         "trader_status_engine_active": True,
-        "trader_statuses": ["UPCOMING", "NEAR", "READY", "MISSED", "INVALID", "NO_PLAN", "PLAN", "WAIT", "HANDS_OFF", "SCALE_OUT"],
+        "trader_statuses": ["PLAN", "READY", "WAIT", "HANDS_OFF", "MISSED", "SCALE_OUT"],
         "setup_family_rule": "Elke setup valt in exact één van deze families: early_price_action of retest_breakout.",
         "primary_side": primary_side,
         "alternate_side": alternate_side,
@@ -9190,6 +8694,8 @@ if "scanner_last_scan_epoch" not in st.session_state:
     st.session_state.scanner_last_scan_epoch = 0.0
 if "shared_market_snapshot" not in st.session_state:
     st.session_state.shared_market_snapshot = {"created_at": 0.0, "price_map": {}, "price_source": "unknown", "fetch_ts": 0.0}
+if "bf_view_mode" not in st.session_state:
+    st.session_state["bf_view_mode"] = "desktop"
 
 # =========================================================
 # CSS
@@ -9306,6 +8812,16 @@ st.markdown(
         margin-top: 12px;
         line-height: 1.35;
     }
+
+    .bf-mobile-card { background: linear-gradient(180deg, rgba(255,255,255,0.055), rgba(255,255,255,0.025)); border: 1px solid rgba(255,255,255,0.10); border-radius: 18px; padding: 16px; margin: 10px 0; box-shadow: 0 8px 24px rgba(0,0,0,0.16); }
+    .bf-mobile-title { font-size: 1.05rem; font-weight: 900; margin-bottom: 8px; color: #F8FAFC; }
+    .bf-mobile-pill { display: inline-block; padding: 6px 12px; border-radius: 999px; font-weight: 900; font-size: 0.86rem; margin: 2px 4px 8px 0; background: rgba(148,163,184,0.18); color: #E5E7EB; }
+    .bf-mobile-pill.long { background: rgba(34,197,94,0.18); color:#86EFAC; }
+    .bf-mobile-pill.short { background: rgba(239,68,68,0.18); color:#FCA5A5; }
+    .bf-mobile-pill.wait { background: rgba(234,179,8,0.18); color:#FDE68A; }
+    .bf-mobile-line { font-size: 0.96rem; line-height: 1.45; margin: 6px 0; color: #E5E7EB; }
+    .bf-mobile-muted { color: #AAB4C3; font-size: 0.88rem; line-height: 1.4; }
+    @media (max-width: 760px) { .block-container { padding-left: 0.75rem; padding-right: 0.75rem; padding-top: 0.6rem; max-width: 100%; } div[data-testid="stMetric"] { padding: 10px 12px; border-radius: 14px; } .bf-scan-card, .bf-card { min-height: auto; padding: 14px; } .stButton > button { min-height: 44px; border-radius: 14px; font-weight: 800; } }
     </style>
     """,
     unsafe_allow_html=True,
@@ -9315,6 +8831,14 @@ st.markdown(
 # Scanner universe
 # =========================================================
 # Bewust beperkt tot de 5 focusmunten voor validatie.
+
+# =========================================================
+# Weergave switch
+# =========================================================
+view_options = ["🖥️ Desktop weergave", "📱 Mobiele weergave"]
+current_view_index = 1 if st.session_state.get("bf_view_mode") == "mobile" else 0
+selected_view_label = st.radio("Weergave", view_options, index=current_view_index, horizontal=True, label_visibility="collapsed", key="bf_view_mode_radio")
+st.session_state["bf_view_mode"] = "mobile" if selected_view_label.startswith("📱") else "desktop"
 
 # =========================================================
 # Top controls
@@ -9548,11 +9072,10 @@ def compute_ranked_results(scanner_results: List[Dict[str, object]]):
     for result in scanner_results or []:
         item = dict(result)
         item.update(_result_planner_scores(item))
-        # Fase 3: plan-first ranking. Entry-score is confirmation/bonus, niet de hoofdsortering.
         item["planner_overall_rank_score"] = max(
-            item.get("plan_rank_score", -999.0) + 16.0,
-            item.get("entry_rank_score", -999.0) + 4.0,
-            item.get("upcoming_zone_rank_score", -999.0) + 2.0,
+            item.get("entry_rank_score", -999.0) + 12.0,
+            item.get("plan_rank_score", -999.0) + 4.0,
+            item.get("upcoming_zone_rank_score", -999.0),
             float(item.get("score", 0.0) or 0.0),
         )
         enriched.append(item)
@@ -9560,9 +9083,9 @@ def compute_ranked_results(scanner_results: List[Dict[str, object]]):
     ranked_results = sorted(
         enriched,
         key=lambda x: (
+            x.get("entry_rank_score", -999.0),
             x.get("plan_rank_score", -999.0),
             x.get("upcoming_zone_rank_score", -999.0),
-            x.get("entry_rank_score", -999.0),
             grade_rank.get(x.get("setup_grade", "NO DATA"), 0),
             x.get("planner_overall_rank_score", -999.0),
             x.get("conservative_best_net") or -999,
@@ -9710,7 +9233,10 @@ def render_auto_scanner_dashboard():
             })
         st.dataframe(pd.DataFrame(overview_rows), use_container_width=True, hide_index=True)
 
-render_auto_scanner_dashboard()
+if st.session_state.get("bf_view_mode") == "desktop":
+    render_auto_scanner_dashboard()
+else:
+    st.caption("📱 Mobiele weergave actief • breed scanner-overzicht is verborgen; compact overzicht staat onderaan.")
 
 scanner_results = st.session_state.scanner_results
 ranked_results, valid_results, visible_results = compute_ranked_results(scanner_results)
@@ -9727,6 +9253,273 @@ selected_price_map = selected_snapshot.get("price_map", {}) or {}
 live_selected_price = selected_price_map.get(selected_market) or get_live_price_for_market(selected_market)
 if live_selected_price is not None and not st.session_state.manual_override:
     st.session_state.manual_price = float(live_selected_price)
+
+
+# =========================================================
+# Mobiele weergave helpers
+# =========================================================
+def _bf_mobile_active_side(selected_result: Dict[str, object]) -> Optional[str]:
+    return selected_result.get("best_side") or selected_result.get("primary_side") or selected_result.get("context_preferred_side")
+
+
+def _bf_mobile_active_zones(selected_result: Dict[str, object]):
+    side = _bf_mobile_active_side(selected_result)
+    if side == "LONG":
+        return selected_result.get("long_entry_zone"), selected_result.get("long_target_zone"), selected_result.get("long_invalidation_zone")
+    if side == "SHORT":
+        return selected_result.get("short_entry_zone"), selected_result.get("short_target_zone"), selected_result.get("short_invalidation_zone")
+    speelveld = selected_result.get("speelveld") or {}
+    return speelveld.get("support_zone"), speelveld.get("resistance_zone"), None
+
+
+def _bf_mobile_get_selected_result(scanner_results_local: List[Dict[str, object]], selected_coin_local: str) -> Dict[str, object]:
+    cached_selected_result = next((r for r in scanner_results_local if r.get("coin") == selected_coin_local), None)
+    if st.session_state.manual_override:
+        return analyze_coin_setup(
+            coin=selected_coin_local,
+            timeframe_label=timeframe_label,
+            account_size=account_size,
+            min_profit_buffer_eur=min_profit_buffer_eur,
+            target_mode=target_mode,
+            maker_fee_pct=maker_fee_pct,
+            taker_fee_pct=taker_fee_pct,
+            entry_fee_type=entry_fee_type,
+            exit_fee_type=exit_fee_type,
+            short_borrow_hourly_pct_map=short_borrow_hourly_pct_map,
+            expected_hold_hours=expected_hold_hours,
+            short_liquidation_fee_pct=short_liquidation_fee_pct,
+            entry_mode=entry_mode,
+            manual_price=float(st.session_state.manual_price),
+        )
+    if cached_selected_result:
+        market = COINS[selected_coin_local]["bitvavo_market"]
+        live_price = get_live_price_for_market(market)
+        if live_price is not None:
+            return inject_live_price_into_selected_result(cached_selected_result, live_price)
+        return cached_selected_result
+    return analyze_coin_setup(
+        coin=selected_coin_local,
+        timeframe_label=timeframe_label,
+        account_size=account_size,
+        min_profit_buffer_eur=min_profit_buffer_eur,
+        target_mode=target_mode,
+        maker_fee_pct=maker_fee_pct,
+        taker_fee_pct=taker_fee_pct,
+        entry_fee_type=entry_fee_type,
+        exit_fee_type=exit_fee_type,
+        short_borrow_hourly_pct_map=short_borrow_hourly_pct_map,
+        expected_hold_hours=expected_hold_hours,
+        short_liquidation_fee_pct=short_liquidation_fee_pct,
+        entry_mode=entry_mode,
+    )
+
+
+def _bf_mobile_status_icon(status: str) -> str:
+    status = str(status or "").upper()
+    if status in {"READY", "CONFIRMED_READY", "PLAN_READY"}:
+        return "🟢"
+    if status in {"PLAN", "NEAR", "WATCH", "WAIT", "UPCOMING"}:
+        return "🟡"
+    if status in {"HANDS_OFF", "BLOCKED", "MISSED"}:
+        return "🔴"
+    return "🔵"
+
+
+def _bf_mobile_reason(selected_result: Dict[str, object], trade_story: Optional[Dict[str, object]] = None) -> str:
+    if isinstance(trade_story, dict):
+        text = str(trade_story.get("summary") or trade_story.get("detail") or "")
+        if text:
+            return text
+    return str(selected_result.get("context_reason") or selected_result.get("best_reason") or "Geen extra toelichting beschikbaar.")
+
+
+def render_mobile_trade_plan(selected_result: Dict[str, object]) -> None:
+    trade_story = build_trade_tab_story(selected_result)
+    display_side = trade_story.get("display_best_side") or _bf_mobile_active_side(selected_result) or "WACHTEN"
+    display_metrics = trade_story.get("display_best_metrics") or selected_result.get("best_metrics")
+    entry_zone, target_zone, invalidation_zone = _bf_mobile_active_zones(selected_result)
+    status = str(selected_result.get("status") or (trade_story.get("headline") or "WAIT"))
+    pill_class = "long" if display_side == "LONG" else ("short" if display_side == "SHORT" else "wait")
+    price = selected_result.get("live_price") or selected_result.get("current_price")
+    rr_text = f"1 : {float(display_metrics['rr']):.2f}" if isinstance(display_metrics, dict) and display_metrics.get("rr") is not None else "-"
+    score_text = f"{float(selected_result.get('score') or 0.0):.0f}/100"
+
+    if isinstance(display_metrics, dict):
+        entry_text = fmt_price_eur(float(display_metrics["entry"]))
+        stop_text = fmt_price_eur(float(display_metrics["stop"]))
+        target_text = fmt_price_eur(float(display_metrics["target"]))
+    else:
+        entry_text = fmt_zone(entry_zone)
+        stop_text = fmt_zone(invalidation_zone)
+        target_text = fmt_zone(target_zone)
+
+    st.markdown(
+        f"""
+        <div class="bf-mobile-card">
+            <div class="bf-mobile-title">🎯 Trade Plan kaart</div>
+            <span class="bf-mobile-pill {pill_class}">{display_side}</span>
+            <span class="bf-mobile-pill">{_bf_mobile_status_icon(status)} {status}</span>
+            <div class="bf-mobile-line"><strong>Coin / TF:</strong> {selected_result.get('coin', '-')} • {timeframe_label}</div>
+            <div class="bf-mobile-line"><strong>Live prijs:</strong> {fmt_price_eur(float(price)) if price is not None else '-'}</div>
+            <div class="bf-mobile-line"><strong>Entry:</strong> {entry_text}</div>
+            <div class="bf-mobile-line"><strong>Stoploss:</strong> {stop_text}</div>
+            <div class="bf-mobile-line"><strong>Take Profit:</strong> {target_text}</div>
+            <div class="bf-mobile-line"><strong>RR / Score:</strong> {rr_text} • {score_text}</div>
+            <div class="bf-mobile-muted"><strong>Reden:</strong> {_bf_mobile_reason(selected_result, trade_story)}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    if isinstance(display_metrics, dict) and display_side in {"LONG", "SHORT"}:
+        if st.button("📝 Log deze hoofdtrade", key=f"mobile_log_best_{selected_result.get('coin')}", use_container_width=True):
+            entry = build_journal_entry(selected_result, display_side, "best", display_metrics)
+            append_trade_journal(entry)
+            st.success("Hoofdtrade gelogd in journal.")
+    else:
+        st.button("Geen logbare trade", disabled=True, use_container_width=True, key=f"mobile_no_trade_{selected_result.get('coin')}")
+
+
+def render_mobile_market_card(selected_result: Dict[str, object]) -> None:
+    speelveld = selected_result.get("speelveld") or {}
+    price = selected_result.get("live_price") or selected_result.get("current_price")
+    trend = selected_result.get("trend_label") or selected_result.get("context_label_main") or "-"
+    context = selected_result.get("context_label_main") or speelveld.get("context") or "-"
+    support_zone = speelveld.get("support_zone") or selected_result.get("long_entry_zone")
+    resistance_zone = speelveld.get("resistance_zone") or selected_result.get("short_entry_zone")
+    st.markdown(
+        f"""
+        <div class="bf-mobile-card">
+            <div class="bf-mobile-title">📈 Markt kaart</div>
+            <div class="bf-mobile-line"><strong>Live prijs:</strong> {fmt_price_eur(float(price)) if price is not None else '-'}</div>
+            <div class="bf-mobile-line"><strong>Context:</strong> {context}</div>
+            <div class="bf-mobile-line"><strong>Trend:</strong> {trend}</div>
+            <div class="bf-mobile-line"><strong>Support zone:</strong> {fmt_zone(support_zone)}</div>
+            <div class="bf-mobile-line"><strong>Resistance zone:</strong> {fmt_zone(resistance_zone)}</div>
+            <div class="bf-mobile-muted">{str(speelveld.get('reason') or selected_result.get('context_reason') or '')}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    render_range_position_bar(selected_result, side=_bf_mobile_active_side(selected_result))
+
+
+def render_mobile_chart(selected_result: Dict[str, object]) -> None:
+    st.markdown("### 📉 Compacte chart")
+    entry_zone, target_zone, invalidation_zone = _bf_mobile_active_zones(selected_result)
+    if selected_result.get("entry_df") is None:
+        st.warning("Chartdata tijdelijk niet beschikbaar.")
+        return
+    chart_df = prepare_chart_focus_df(selected_result["entry_df"], timeframe_label)
+    precision_micro = (selected_result.get("lower_tf_precision") or {}).get("micro_structure", {}) if selected_result.get("lower_tf_precision_active") else {}
+    render_price_chart(
+        chart_df,
+        trade_supports=precision_micro.get("trade_supports", selected_result["entry_levels"].get("trade_supports", [])),
+        trade_resistances=precision_micro.get("trade_resistances", selected_result["entry_levels"].get("trade_resistances", [])),
+        hard_supports=precision_micro.get("hard_supports", selected_result["entry_levels"].get("hard_supports", [])),
+        hard_resistances=precision_micro.get("hard_resistances", selected_result["entry_levels"].get("hard_resistances", [])),
+        higher_trade_support=selected_result["higher_trade_support"],
+        higher_trade_resistance=selected_result["higher_trade_resistance"],
+        active_support=selected_result["entry_trade_support"],
+        active_resistance=selected_result["entry_trade_resistance"],
+        support_zone=selected_result.get("long_entry_zone") or (selected_result.get("speelveld") or {}).get("support_zone"),
+        resistance_zone=selected_result.get("short_entry_zone") or (selected_result.get("speelveld") or {}).get("resistance_zone"),
+        target_zone=target_zone,
+        invalidation_zone=invalidation_zone,
+        height=360,
+    )
+
+
+def render_mobile_scanner_overview(ranked_results_local: List[Dict[str, object]]) -> None:
+    st.markdown("### 🔎 Compact scanner-overzicht")
+    for result in ranked_results_local[:len(COINS)]:
+        side = result.get("best_side") or result.get("primary_side") or result.get("context_preferred_side") or "-"
+        timing = result.get("setup_timing", {}) or {}
+        status = timing.get("long_timing") if side == "LONG" else (timing.get("short_timing") if side == "SHORT" else result.get("status"))
+        entry_zone = result.get("long_entry_zone") if side == "LONG" else (result.get("short_entry_zone") if side == "SHORT" else None)
+        target_zone = result.get("long_target_zone") if side == "LONG" else (result.get("short_target_zone") if side == "SHORT" else None)
+        with st.expander(f"{result.get('coin')} • {side} • {status or '-'}", expanded=result.get("coin") == st.session_state.selected_coin):
+            st.write(f"**Context:** {result.get('context_label_main') or result.get('trend_label') or '-'}")
+            st.write(f"**Entry-zone:** {fmt_zone(entry_zone)}")
+            st.write(f"**Target-zone:** {fmt_zone(target_zone)}")
+            st.caption(str(result.get("context_reason") or result.get("best_reason") or ""))
+            if st.button(f"Open {result.get('coin')}", key=f"mobile_open_{result.get('coin')}", use_container_width=True):
+                st.session_state.selected_coin = result["coin"]
+                st.rerun()
+
+
+def render_mobile_journal_learning() -> None:
+    with st.expander("📝 Journal", expanded=False):
+        journal_df = load_trade_journal()
+        if journal_df.empty:
+            st.info("Nog geen journal trades.")
+        else:
+            open_count = int((journal_df["outcome"].fillna("OPEN") == "OPEN").sum()) if "outcome" in journal_df.columns else 0
+            st.metric("Open journal trades", open_count)
+            st.dataframe(journal_df.tail(10), use_container_width=True, hide_index=True)
+    with st.expander("🧠 Learning", expanded=False):
+        learning = build_learning_engine(load_trade_journal(), load_daily_results())
+        if learning["closed_df"].empty:
+            st.info("Nog te weinig gesloten trades om te leren.")
+        else:
+            st.markdown("**Top inzichten**")
+            for item in learning.get("top_working", [])[:3]:
+                st.success(item)
+            st.markdown("**Verbeterpunten**")
+            for item in learning.get("top_improve", [])[:3]:
+                st.warning(item)
+    with st.expander("📒 Dagresultaten", expanded=False):
+        daily_df = load_daily_results()
+        if daily_df.empty:
+            st.info("Nog geen dagresultaten ingevuld.")
+        else:
+            st.dataframe(daily_df.tail(10), use_container_width=True, hide_index=True)
+
+
+def render_mobile_app(scanner_results_local: List[Dict[str, object]], ranked_results_local: List[Dict[str, object]]) -> None:
+    st.subheader("📱 BullForge mobiele weergave")
+    st.caption("Compact dashboard: trade plan → markt → chart → scanner/journal/learning.")
+
+    selected_coin_local = st.selectbox(
+        "Coin",
+        list(COINS.keys()),
+        index=list(COINS.keys()).index(st.session_state.selected_coin) if st.session_state.selected_coin in COINS else 0,
+        key="mobile_selected_coin",
+    )
+    if selected_coin_local != st.session_state.selected_coin:
+        st.session_state.selected_coin = selected_coin_local
+        st.rerun()
+
+    with st.expander("⚙️ Mobiele instellingen", expanded=False):
+        st.session_state.manual_override = st.checkbox("Handmatige prijs", value=st.session_state.manual_override, key="mobile_manual_override")
+        st.session_state.manual_price = st.number_input(
+            "Prijs (€)",
+            min_value=0.0,
+            value=float(st.session_state.manual_price),
+            step=0.0001,
+            format="%.8f",
+            disabled=not st.session_state.manual_override,
+            key="mobile_manual_price",
+        )
+        st.caption(f"Scanner timeframe: {timeframe_label} • Account: {fmt_eur(float(st.session_state.account_size))}")
+
+    selected_result = _bf_mobile_get_selected_result(scanner_results_local, st.session_state.selected_coin)
+    render_mobile_trade_plan(selected_result)
+    render_mobile_market_card(selected_result)
+    render_volume_panel(selected_result, compact=True)
+    render_mobile_chart(selected_result)
+
+    with st.expander("🧭 Speelveld details", expanded=False):
+        render_speelveld_panel(selected_result, compact=True)
+    with st.expander("📦 Entry ladder / plan details", expanded=False):
+        render_plan_vs_entry_sections(selected_result)
+
+    render_mobile_scanner_overview(ranked_results_local)
+    render_mobile_journal_learning()
+
+
+if st.session_state.get("bf_view_mode") == "mobile":
+    render_mobile_app(scanner_results, ranked_results)
+    st.stop()
 
 # =========================================================
 # Tabs
@@ -9799,19 +9592,9 @@ def render_live_market_and_trade_tabs():
         return "Auto"
 
     def _active_side(selected_result: Dict[str, object]) -> Optional[str]:
-        primary_plan = selected_result.get("primary_trade_plan") or {}
-        if isinstance(primary_plan, dict) and primary_plan.get("side") in {"LONG", "SHORT"}:
-            return primary_plan.get("side")
         return selected_result.get("best_side") or selected_result.get("primary_side") or selected_result.get("context_preferred_side")
 
     def _active_zones(selected_result: Dict[str, object]):
-        primary_plan = selected_result.get("primary_trade_plan") or {}
-        if isinstance(primary_plan, dict) and primary_plan.get("side") in {"LONG", "SHORT"}:
-            return (
-                primary_plan.get("entry_zone"),
-                primary_plan.get("target_zone"),
-                primary_plan.get("invalidation_zone"),
-            )
         side = _active_side(selected_result)
         if side == "LONG":
             return selected_result.get("long_entry_zone"), selected_result.get("long_target_zone"), selected_result.get("long_invalidation_zone")
@@ -9823,9 +9606,9 @@ def render_live_market_and_trade_tabs():
         status = str(status or "").upper()
         if status in {"READY", "CONFIRMED_READY", "PLAN_READY"}:
             return "🟢"
-        if status in {"UPCOMING", "PLAN", "NEAR", "WATCH", "WAIT"}:
+        if status in {"PLAN", "NEAR", "WATCH", "WAIT"}:
             return "🟡"
-        if status in {"HANDS_OFF", "BLOCKED", "MISSED", "INVALID", "NO_PLAN"}:
+        if status in {"HANDS_OFF", "BLOCKED", "MISSED"}:
             return "🔴"
         return "🔵"
 
@@ -9844,23 +9627,17 @@ def render_live_market_and_trade_tabs():
         z3.markdown(f"**✅ Target-zone**  \n{fmt_zone(target_zone)}")
 
     def _render_top_summary(selected_result: Dict[str, object], trade_story: Optional[Dict[str, object]] = None) -> None:
-        primary_plan = selected_result.get("primary_trade_plan") or {}
         side = _active_side(selected_result) or "-"
-        status = str(primary_plan.get("status") or selected_result.get("status") or "-") if isinstance(primary_plan, dict) else str(selected_result.get("status") or "-")
-        action = str(primary_plan.get("action_label") or status) if isinstance(primary_plan, dict) else status
+        status = str(selected_result.get("status") or "-")
         price = selected_result.get("live_price") or selected_result.get("current_price")
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Prijs", fmt_price_eur(float(price)) if price is not None else "-")
         c2.metric("Context", str(selected_result.get("context_label_main") or "-"))
-        c3.metric("Planstatus", f"{_status_icon(status)} {status}")
+        c3.metric("Actie", f"{_status_icon(status)} {status}")
         c4.metric("Richting", str(side))
-        st.caption(str(primary_plan.get("plan_reason") or _one_line_reason(selected_result, trade_story)) if isinstance(primary_plan, dict) else _one_line_reason(selected_result, trade_story))
+        st.caption(_one_line_reason(selected_result, trade_story))
 
     def _render_plan_summary(selected_result: Dict[str, object], display_best_side=None, display_best_metrics=None) -> None:
-        primary_plan = selected_result.get("primary_trade_plan")
-        if isinstance(primary_plan, dict):
-            render_primary_trade_plan_card(primary_plan)
-            return
         active_entry_zone, active_target_zone, active_invalidation_zone = _active_zones(selected_result)
         side = display_best_side or _active_side(selected_result) or "-"
         status = str(selected_result.get("status") or "-")
